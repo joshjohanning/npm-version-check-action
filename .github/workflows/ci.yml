@@ -1,0 +1,58 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Required for git tag comparison
+      
+      - name: Test the action
+        uses: ./
+        with:
+          package-path: 'package.json'
+          tag-prefix: 'v'
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install dependencies (if any)
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f package.json ]; then
+            npm install
+          fi
+      
+      - name: Run linting
+        run: |
+          # Check if shellcheck is available
+          if command -v shellcheck &> /dev/null; then
+            shellcheck version-check.sh
+          else
+            echo "shellcheck not available, skipping shell script linting"
+          fi
+      
+      - name: Validate action.yml
+        run: |
+          # Basic validation that action.yml is valid YAML
+          if command -v yq &> /dev/null; then
+            yq eval '.' action.yml > /dev/null
+          else
+            # Fallback to python yaml check
+            python -c "import yaml; yaml.safe_load(open('action.yml'))"
+          fi

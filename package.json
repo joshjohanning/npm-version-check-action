@@ -1,0 +1,42 @@
+{
+  "name": "npm-version-check-action",
+  "description": "GitHub Action that validates npm package version increments in pull requests to ensure proper semantic versioning",
+  "version": "1.0.0",
+  "type": "module",
+  "author": {
+    "name": "Josh Johanning",
+    "email": "joshjohanning@github.com",
+    "url": "https://github.com/joshjohanning"
+  },
+  "private": true,
+  "homepage": "https://github.com/joshjohanning/npm-version-check-action#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/joshjohanning/npm-version-check-action.git"
+  },
+  "bugs": {
+    "url": "https://github.com/joshjohanning/npm-version-check-action/issues"
+  },
+  "keywords": [
+    "github-action",
+    "npm",
+    "version",
+    "semantic-versioning",
+    "pull-request",
+    "validation",
+    "package-json"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "scripts": {
+    "test": "echo \"No tests specified\" && exit 0",
+    "format:check": "prettier --check .",
+    "format:write": "prettier --write .",
+    "lint": "shellcheck version-check.sh"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "prettier": "^3.0.0"
+  }
+}

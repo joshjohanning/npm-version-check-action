@@ -1,0 +1,46 @@
+name: 'npm-version-check-action'
+description: 'GitHub Action that validates npm package version increments in pull requests to ensure proper semantic versioning'
+author: 'Josh Johanning'
+branding:
+  icon: 'check-circle'
+  color: 'green'
+
+inputs:
+  package-path:
+    description: 'Path to package.json file (relative to repository root)'
+    required: false
+    default: 'package.json'
+  tag-prefix:
+    description: 'Prefix for version tags (e.g., "v" for v1.0.0)'
+    required: false
+    default: 'v'
+  skip-files-check:
+    description: 'Skip checking if JS/package files changed (always run version check)'
+    required: false
+    default: 'false'
+
+outputs:
+  version-changed:
+    description: 'Whether the version was changed'
+    value: ${{ steps.version-check.outputs.version-changed }}
+  current-version:
+    description: 'Current version from package.json'
+    value: ${{ steps.version-check.outputs.current-version }}
+  previous-version:
+    description: 'Previous version from latest git tag'
+    value: ${{ steps.version-check.outputs.previous-version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check npm version increment
+      id: version-check
+      shell: bash
+      run: ${{ github.action_path }}/version-check.sh
+      env:
+        PACKAGE_PATH: ${{ inputs.package-path }}
+        TAG_PREFIX: ${{ inputs.tag-prefix }}
+        SKIP_FILES_CHECK: ${{ inputs.skip-files-check }}
+        GITHUB_EVENT_NAME: ${{ github.event_name }}
+        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        CURRENT_SHA: ${{ github.sha }}
