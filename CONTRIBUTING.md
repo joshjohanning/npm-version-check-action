@@ -19,17 +19,29 @@ Before submitting a pull request, please test your changes:
 
 ### Local Testing
 
-You can test the shell script directly:
+You can test the JavaScript action directly:
 
 ```bash
-# Test with default settings
-./version-check.sh
+# Install dependencies
+npm ci
 
+# Build the action
+npm run package
+
+# Test the action
+node dist/index.js
+```
+
+### Testing with different inputs
+
+Set environment variables to test different scenarios:
+
+```bash
 # Test with custom settings
-PACKAGE_PATH="custom/package.json" TAG_PREFIX="release-" ./version-check.sh
+INPUT_PACKAGE_PATH="custom/package.json" INPUT_TAG_PREFIX="release-" node dist/index.js
 
-# Test PR simulation
-GITHUB_EVENT_NAME=pull_request SKIP_FILES_CHECK=true ./version-check.sh
+# Test PR simulation (requires git setup)
+GITHUB_EVENT_NAME=pull_request INPUT_SKIP_FILES_CHECK=true node dist/index.js
 ```
 
 ### Action Testing
@@ -39,17 +51,17 @@ Test the action by creating a workflow in your fork and triggering it.
 ## 📝 Code Style
 
 - Use clear, descriptive variable names
-- Add comments for complex logic
+- Add JSDoc comments for functions
 - Follow existing code patterns
 - Use emoji in output messages consistently
 - Ensure proper error handling
 
-### Shell Script Guidelines
+### JavaScript Guidelines
 
-- Use `set -e` for fail-fast behavior
-- Quote variables properly
-- Use `[[ ]]` for conditionals
-- Prefer explicit over implicit
+- Use ES6+ features where appropriate
+- Prefer `const` and `let` over `var`
+- Use async/await for asynchronous operations
+- Handle errors gracefully with try/catch
 
 ## 🐛 Bug Reports
 

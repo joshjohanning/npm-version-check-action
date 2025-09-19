@@ -79,3 +79,6 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+# Keep dist directory for GitHub Actions
+# !dist/

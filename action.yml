@@ -22,25 +22,11 @@ inputs:
 outputs:
   version-changed:
     description: 'Whether the version was changed'
-    value: ${{ steps.version-check.outputs.version-changed }}
   current-version:
     description: 'Current version from package.json'
-    value: ${{ steps.version-check.outputs.current-version }}
   previous-version:
     description: 'Previous version from latest git tag'
-    value: ${{ steps.version-check.outputs.previous-version }}
 
 runs:
-  using: 'composite'
-  steps:
-    - name: Check npm version increment
-      id: version-check
-      shell: bash
-      run: ${{ github.action_path }}/version-check.sh
-      env:
-        PACKAGE_PATH: ${{ inputs.package-path }}
-        TAG_PREFIX: ${{ inputs.tag-prefix }}
-        SKIP_FILES_CHECK: ${{ inputs.skip-files-check }}
-        GITHUB_EVENT_NAME: ${{ github.event_name }}
-        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        CURRENT_SHA: ${{ github.sha }}
+  using: 'node20'
+  main: 'dist/index.js'

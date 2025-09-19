@@ -11,13 +11,13 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
+
       # Check multiple packages in monorepo
       - name: Check frontend version
         id: frontend-version
@@ -25,25 +25,25 @@ jobs:
         with:
           package-path: 'packages/frontend/package.json'
           tag-prefix: 'frontend-v'
-      
+
       - name: Check backend version
         id: backend-version
         uses: joshjohanning/npm-version-check-action@v1
         with:
           package-path: 'packages/backend/package.json'
           tag-prefix: 'backend-v'
-      
+
       # Use outputs for further processing
       - name: Print version info
         run: |
           echo "Frontend version changed: ${{ steps.frontend-version.outputs.version-changed }}"
           echo "Frontend current: ${{ steps.frontend-version.outputs.current-version }}"
           echo "Frontend previous: ${{ steps.frontend-version.outputs.previous-version }}"
-          
+
           echo "Backend version changed: ${{ steps.backend-version.outputs.version-changed }}"
           echo "Backend current: ${{ steps.backend-version.outputs.current-version }}"
           echo "Backend previous: ${{ steps.backend-version.outputs.previous-version }}"
-      
+
       # Conditional steps based on version changes
       - name: Frontend tests
         if: steps.frontend-version.outputs.version-changed == 'true'
@@ -51,7 +51,7 @@ jobs:
           cd packages/frontend
           npm ci
           npm test
-      
+
       - name: Backend tests
         if: steps.backend-version.outputs.version-changed == 'true'
         run: |

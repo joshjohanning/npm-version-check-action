@@ -14,7 +14,7 @@ This action prevents developers from forgetting to bump package.json version bef
 - 📊 **Semantic versioning validation** - Ensures new version is higher than previous release
 - 🏷️ **Git tag comparison** - Compares against the latest git tag
 - 🎉 **First release support** - Gracefully handles repositories with no previous tags
-- 🚀 **Composite action** - Fast execution without Docker overhead
+- 🚀 **JavaScript action** - Fast execution with Node.js runtime
 - 📝 **Clear messaging** - Provides detailed success/error messages with emojis
 - ⚙️ **Configurable** - Supports custom package.json paths and tag prefixes
 
@@ -42,8 +42,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Required to fetch git tags
-      
+          fetch-depth: 0 # Required to fetch git tags
+
       - uses: joshjohanning/npm-version-check-action@v1
 ```
 
@@ -52,9 +52,9 @@ jobs:
 ```yaml
 - uses: joshjohanning/npm-version-check-action@v1
   with:
-    package-path: 'packages/core/package.json'  # Custom package.json path
-    tag-prefix: 'v'                             # Tag prefix (default: 'v')
-    skip-files-check: 'false'                   # Always run, don't check files
+    package-path: 'packages/core/package.json' # Custom package.json path
+    tag-prefix: 'v' # Tag prefix (default: 'v')
+    skip-files-check: 'false' # Always run, don't check files
 ```
 
 ### Complete Workflow Example
@@ -73,47 +73,47 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Required for git tag comparison
-      
+          fetch-depth: 0 # Required for git tag comparison
+
       - name: Check version increment
         uses: joshjohanning/npm-version-check-action@v1
         with:
           package-path: 'package.json'
           tag-prefix: 'v'
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
           cache: 'npm'
-      
+
       - name: Install dependencies
         run: npm ci
-      
+
       - name: Run tests
         run: npm test
 ```
 
 ## 📥 Inputs
 
-| Input | Description | Required | Default |
-|-------|-------------|----------|---------|
-| `package-path` | Path to package.json file (relative to repository root) | No | `package.json` |
-| `tag-prefix` | Prefix for version tags (e.g., "v" for v1.0.0) | No | `v` |
-| `skip-files-check` | Skip checking if JS/package files changed (always run version check) | No | `false` |
+| Input              | Description                                                          | Required | Default        |
+| ------------------ | -------------------------------------------------------------------- | -------- | -------------- |
+| `package-path`     | Path to package.json file (relative to repository root)              | No       | `package.json` |
+| `tag-prefix`       | Prefix for version tags (e.g., "v" for v1.0.0)                       | No       | `v`            |
+| `skip-files-check` | Skip checking if JS/package files changed (always run version check) | No       | `false`        |
 
 ## 📤 Outputs
 
-| Output | Description |
-|--------|-------------|
-| `version-changed` | Whether the version was changed (`true`/`false`) |
-| `current-version` | Current version from package.json |
-| `previous-version` | Previous version from latest git tag |
+| Output             | Description                                      |
+| ------------------ | ------------------------------------------------ |
+| `version-changed`  | Whether the version was changed (`true`/`false`) |
+| `current-version`  | Current version from package.json                |
+| `previous-version` | Previous version from latest git tag             |
 
 ### Using Outputs
 
@@ -140,21 +140,22 @@ jobs:
 ### Supported File Extensions
 
 The action checks for changes in files with these extensions:
+
 - `.js` - JavaScript files
-- `.ts` - TypeScript files  
+- `.ts` - TypeScript files
 - `.jsx` - React JavaScript files
 - `.tsx` - React TypeScript files
 - `package*.json` - Package configuration files
 
 ## 📋 Version Increment Examples
 
-| Previous | Current | Result |
-|----------|---------|--------|
-| `1.0.0` | `1.0.1` | ✅ Valid (patch) |
-| `1.0.0` | `1.1.0` | ✅ Valid (minor) |
-| `1.0.0` | `2.0.0` | ✅ Valid (major) |
-| `1.0.0` | `1.0.0` | ❌ Same version |
-| `1.1.0` | `1.0.5` | ❌ Lower version |
+| Previous | Current | Result           |
+| -------- | ------- | ---------------- |
+| `1.0.0`  | `1.0.1` | ✅ Valid (patch) |
+| `1.0.0`  | `1.1.0` | ✅ Valid (minor) |
+| `1.0.0`  | `2.0.0` | ✅ Valid (major) |
+| `1.0.0`  | `1.0.0` | ❌ Same version  |
+| `1.1.0`  | `1.0.5` | ❌ Lower version |
 
 ## 🛠️ Common Use Cases
 
@@ -179,7 +180,7 @@ If your tags don't use the `v` prefix:
 ```yaml
 - uses: joshjohanning/npm-version-check-action@v1
   with:
-    tag-prefix: 'release-'  # For tags like 'release-1.0.0'
+    tag-prefix: 'release-' # For tags like 'release-1.0.0'
 ```
 
 ### Always Run (Skip File Check)

@@ -26,17 +26,47 @@
     "validation",
     "package-json"
   ],
+  "exports": {
+    ".": "./dist/index.js"
+  },
   "engines": {
-    "node": ">=16"
+    "node": ">=20"
   },
   "scripts": {
-    "test": "echo \"No tests specified\" && exit 0",
-    "format:check": "prettier --check .",
-    "format:write": "prettier --write .",
-    "lint": "shellcheck version-check.sh"
+    "bundle": "npm run format:write && npm run package",
+    "ci-test": "npx jest",
+    "coverage": "npx make-coverage-badge --output-path ./badges/coverage.svg",
+    "format:write": "npx prettier --write .",
+    "format:check": "npx prettier --check .",
+    "lint": "npx eslint . -c ./.github/linters/.eslintrc.yml",
+    "package": "npx ncc build src/index.js -o dist --source-map --license licenses.txt",
+    "package:watch": "npm run package -- --watch",
+    "test": "npx jest",
+    "all": "npm run format:write && npm run lint && npm run test && npm run coverage && npm run package"
   },
   "license": "MIT",
+  "dependencies": {
+    "@actions/core": "^1.10.1",
+    "@actions/exec": "^1.1.1",
+    "@actions/github": "^6.0.0",
+    "semver": "^7.5.4"
+  },
   "devDependencies": {
-    "prettier": "^3.0.0"
+    "@types/jest": "^29.5.8",
+    "@types/node": "^20.9.0",
+    "@types/semver": "^7.5.5",
+    "@typescript-eslint/eslint-plugin": "^6.12.0",
+    "@typescript-eslint/parser": "^6.12.0",
+    "@vercel/ncc": "^0.38.1",
+    "eslint": "^8.54.0",
+    "eslint-plugin-github": "^4.10.1",
+    "eslint-plugin-jest": "^27.6.0",
+    "eslint-plugin-jsonc": "^2.10.0",
+    "eslint-plugin-prettier": "^5.0.1",
+    "jest": "^29.7.0",
+    "make-coverage-badge": "^1.2.0",
+    "prettier": "^3.1.0",
+    "prettier-eslint": "^16.1.2",
+    "typescript": "^5.2.2"
   }
 }

@@ -11,33 +11,33 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Required for git tag comparison
-      
+          fetch-depth: 0 # Required for git tag comparison
+
       - name: Check npm version increment
         uses: joshjohanning/npm-version-check-action@v1
         with:
           package-path: 'package.json'
           tag-prefix: 'v'
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
           cache: 'npm'
-      
+
       - name: Install dependencies
         run: npm ci
-      
+
       - name: Run linting
         run: npm run lint
-      
+
       - name: Run tests
         run: npm test
-      
+
       - name: Build project
         run: npm run build
