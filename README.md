@@ -13,6 +13,7 @@ This action prevents developers from forgetting to bump package.json version bef
 - 🎯 **Smart file detection** - Only runs when JavaScript/TypeScript/package files are modified
 - 📊 **Semantic versioning validation** - Ensures new version is higher than previous release
 - 🏷️ **Git tag comparison** - Compares against the latest git tag
+- 🚀 **Shallow clone compatible** - Automatically fetches tags, works with default checkout
 - 🎉 **First release support** - Gracefully handles repositories with no previous tags
 - 🚀 **JavaScript action** - Fast execution with Node.js runtime
 - 📝 **Clear messaging** - Provides detailed success/error messages with emojis
@@ -41,8 +42,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0 # Required to fetch git tags
 
       - uses: joshjohanning/npm-version-check-action@v1
 ```
@@ -77,8 +76,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-        with:
-          fetch-depth: 0 # Required for git tag comparison
 
       - name: Check version increment
         uses: joshjohanning/npm-version-check-action@v1
@@ -210,15 +207,9 @@ Ensure your `package.json` has a valid `version` field:
 }
 ```
 
-### "fetch-depth: 0 required"
+### "Warning: Could not fetch git tags"
 
-Make sure your checkout action includes `fetch-depth: 0` to fetch git history:
-
-```yaml
-- uses: actions/checkout@v5
-  with:
-    fetch-depth: 0
-```
+The action automatically fetches git tags to work with shallow clones. If this warning appears, it means there was an issue fetching tags, but the action will continue with limited functionality. This is rare and usually indicates network or permission issues.
 
 ## 📝 License
 

@@ -15,8 +15,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-        with:
-          fetch-depth: 0 # Required for git tag comparison
 
       - name: Check npm version increment
         uses: joshjohanning/npm-version-check-action@v1

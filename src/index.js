@@ -166,6 +166,20 @@ function compareVersions(current, previous) {
 }
 
 /**
+ * Fetch git tags to ensure they're available in shallow clones
+ */
+async function fetchTags() {
+  try {
+    logMessage('🏷️  Fetching git tags...', colors.blue);
+    await execGit(['fetch', '--tags']);
+    logMessage('✅ Git tags fetched successfully', colors.green);
+  } catch (error) {
+    core.warning(`Could not fetch git tags: ${error.message}. Some version comparisons may be limited.`);
+    logMessage(`⚠️  Warning: Could not fetch git tags: ${error.message}`, colors.yellow);
+  }
+}
+
+/**
  * Main action logic
  */
 async function run() {
@@ -180,6 +194,9 @@ async function run() {
     logMessage(`Package path: ${packagePath}`);
     logMessage(`Tag prefix: ${tagPrefix}`);
     logMessage(`Skip files check: ${skipFilesCheck}`);
+
+    // Fetch git tags to ensure they're available for version comparison
+    await fetchTags();
 
     // Initialize outputs
     core.setOutput('version-changed', 'false');
