@@ -1,0 +1,37 @@
+env:
+  commonjs: true
+  es6: true
+  jest: true
+  node: true
+
+extends:
+  - eslint:recommended
+  - plugin:github/recommended
+  - plugin:jest/recommended
+
+globals:
+  Atomics: readonly
+  SharedArrayBuffer: readonly
+
+ignorePatterns:
+  - '!.*'
+  - '**/node_modules/**'
+  - '**/dist/**'
+  - '**/coverage/**'
+  - '*.json'
+
+parserOptions:
+  ecmaVersion: 2023
+  sourceType: module
+
+rules:
+  camelcase: 'off'
+  eslint-comments/no-use: 'off'
+  eslint-comments/no-unused-disable: 'off'
+  i18n-text/no-en: 'off'
+  import/no-commonjs: 'off'
+  import/no-namespace: 'off'
+  no-console: 'off'
+  no-unused-vars: 'error'
+  prettier/prettier: 'error'
+  semi: 'error'
