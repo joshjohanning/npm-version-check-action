@@ -78,22 +78,56 @@ async function getChangedFiles() {
 }
 
 /**
- * Check if any JavaScript/TypeScript or package files were changed
+ * Check if a single file is relevant for version checking (excluding test files)
  */
-function hasRelevantFileChanges(changedFiles) {
+function isRelevantFile(file) {
   const relevantExtensions = /\.(js|ts|jsx|tsx|json)$/;
   const packageFiles = /package.*\.json$/;
 
-  return changedFiles.some(file => {
-    return (
-      relevantExtensions.test(file) &&
-      (file.endsWith('.js') ||
-        file.endsWith('.ts') ||
-        file.endsWith('.jsx') ||
-        file.endsWith('.tsx') ||
-        packageFiles.test(file))
-    );
-  });
+  // Must have relevant extension
+  if (!relevantExtensions.test(file)) {
+    return false;
+  }
+
+  // Patterns for test files and directories to exclude
+  const testPatterns = [
+    /\/tests?\//, // test/ or tests/ directories
+    /\/__tests__\//, // __tests__ directories (Jest convention)
+    /\.test\./, // .test.js, .test.ts, etc.
+    /\.spec\./, // .spec.js, .spec.ts, etc.
+    /\/test\./, // files starting with test.
+    /\/spec\./, // files starting with spec.
+    /\.config\./, // config files (.eslintrc.js, jest.config.js, etc.)
+    /\/\.github\//, // GitHub workflow files
+    /\/docs?\//, // doc/ or docs/ directories
+    /\/examples?\//, // example/ or examples/ directories
+    /\/scripts?\//, // script/ or scripts/ directories
+    /\/\.vscode\//, // VS Code settings
+    /\/coverage\//, // coverage reports
+    /\/dist\//, // build output
+    /\/build\//, // build output
+    /\/node_modules\// // dependencies
+  ];
+
+  // Exclude test files and other non-production files
+  if (testPatterns.some(pattern => pattern.test(file))) {
+    return false;
+  }
+
+  // Include package.json files
+  if (packageFiles.test(file)) {
+    return true;
+  }
+
+  // Include JavaScript/TypeScript files that aren't excluded above
+  return file.endsWith('.js') || file.endsWith('.ts') || file.endsWith('.jsx') || file.endsWith('.tsx');
+}
+
+/**
+ * Check if any JavaScript/TypeScript or package files were changed (excluding test files)
+ */
+function hasRelevantFileChanges(changedFiles) {
+  return changedFiles.some(file => isRelevantFile(file));
 }
 
 /**
@@ -220,18 +254,7 @@ async function run() {
       }
 
       logMessage('✅ JavaScript/TypeScript or package files changed, proceeding with version check...');
-      const relevantFiles = changedFiles.filter(file => {
-        const relevantExtensions = /\.(js|ts|jsx|tsx|json)$/;
-        const packageFiles = /package.*\.json$/;
-        return (
-          relevantExtensions.test(file) &&
-          (file.endsWith('.js') ||
-            file.endsWith('.ts') ||
-            file.endsWith('.jsx') ||
-            file.endsWith('.tsx') ||
-            packageFiles.test(file))
-        );
-      });
+      const relevantFiles = changedFiles.filter(file => isRelevantFile(file));
       logMessage(`Changed files: ${relevantFiles.join(', ')}`);
     }
 
