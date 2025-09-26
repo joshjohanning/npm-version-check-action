@@ -263,31 +263,31 @@ async function run() {
     const comparison = compareVersions(currentVersion, latestVersion);
 
     switch (comparison) {
-    case 'same':
-      core.setFailed(
-        `❌ ERROR: Package version (${currentVersion}) is the same as the latest release. You need to increment it.`
-      );
-      logMessage(
-        '💡 HINT: Run \'npm version patch\', \'npm version minor\', or \'npm version major\' to increment the version',
-        'notice'
-      );
-      return;
+      case 'same':
+        core.setFailed(
+          `❌ ERROR: Package version (${currentVersion}) is the same as the latest release. You need to increment it.`
+        );
+        logMessage(
+          "💡 HINT: Run 'npm version patch', 'npm version minor', or 'npm version major' to increment the version",
+          'notice'
+        );
+        return;
 
-    case 'lower':
-      core.setFailed(
-        `❌ ERROR: Package version (${currentVersion}) is lower than the latest release (${latestVersion})`
-      );
-      logMessage(
-        '💡 HINT: Version should be higher than the previous release. Consider using semantic versioning.',
-        'notice'
-      );
-      return;
+      case 'lower':
+        core.setFailed(
+          `❌ ERROR: Package version (${currentVersion}) is lower than the latest release (${latestVersion})`
+        );
+        logMessage(
+          '💡 HINT: Version should be higher than the previous release. Consider using semantic versioning.',
+          'notice'
+        );
+        return;
 
-    case 'higher':
-      logMessage(`✅ Version has been properly incremented from ${latestVersion} to ${currentVersion}`);
-      logMessage('🎯 Semantic versioning check passed!');
-      core.setOutput('version-changed', 'true');
-      break;
+      case 'higher':
+        logMessage(`✅ Version has been properly incremented from ${latestVersion} to ${currentVersion}`);
+        logMessage('🎯 Semantic versioning check passed!');
+        core.setOutput('version-changed', 'true');
+        break;
     }
 
     logMessage('🏁 Version check completed successfully');
