@@ -83,7 +83,7 @@ async function getChangedFiles() {
 function isRelevantFile(file) {
   const relevantExtensions = /\.(js|ts|jsx|tsx|json)$/;
   const packageFiles = /package.*\.json$/;
-  
+
   // Must have relevant extension
   if (!relevantExtensions.test(file)) {
     return false;
@@ -91,22 +91,22 @@ function isRelevantFile(file) {
 
   // Patterns for test files and directories to exclude
   const testPatterns = [
-    /\/tests?\//,           // test/ or tests/ directories
-    /\/__tests__\//,        // __tests__ directories (Jest convention)
-    /\.test\./,             // .test.js, .test.ts, etc.
-    /\.spec\./,             // .spec.js, .spec.ts, etc.
-    /\/test\./,             // files starting with test.
-    /\/spec\./,             // files starting with spec.
-    /\.config\./,           // config files (.eslintrc.js, jest.config.js, etc.)
-    /\/\.github\//,         // GitHub workflow files
-    /\/docs?\//,            // doc/ or docs/ directories
-    /\/examples?\//,        // example/ or examples/ directories
-    /\/scripts?\//,         // script/ or scripts/ directories
-    /\/\.vscode\//,         // VS Code settings
-    /\/coverage\//,         // coverage reports
-    /\/dist\//,             // build output
-    /\/build\//,            // build output
-    /\/node_modules\//      // dependencies
+    /\/tests?\//, // test/ or tests/ directories
+    /\/__tests__\//, // __tests__ directories (Jest convention)
+    /\.test\./, // .test.js, .test.ts, etc.
+    /\.spec\./, // .spec.js, .spec.ts, etc.
+    /\/test\./, // files starting with test.
+    /\/spec\./, // files starting with spec.
+    /\.config\./, // config files (.eslintrc.js, jest.config.js, etc.)
+    /\/\.github\//, // GitHub workflow files
+    /\/docs?\//, // doc/ or docs/ directories
+    /\/examples?\//, // example/ or examples/ directories
+    /\/scripts?\//, // script/ or scripts/ directories
+    /\/\.vscode\//, // VS Code settings
+    /\/coverage\//, // coverage reports
+    /\/dist\//, // build output
+    /\/build\//, // build output
+    /\/node_modules\// // dependencies
   ];
 
   // Exclude test files and other non-production files
@@ -120,12 +120,7 @@ function isRelevantFile(file) {
   }
 
   // Include JavaScript/TypeScript files that aren't excluded above
-  return (
-    file.endsWith('.js') ||
-    file.endsWith('.ts') ||
-    file.endsWith('.jsx') ||
-    file.endsWith('.tsx')
-  );
+  return file.endsWith('.js') || file.endsWith('.ts') || file.endsWith('.jsx') || file.endsWith('.tsx');
 }
 
 /**
