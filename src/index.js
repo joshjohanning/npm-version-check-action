@@ -95,8 +95,8 @@ function isRelevantFile(file) {
     /\/__tests__\//, // __tests__ directories (Jest convention)
     /\.test\./, // .test.js, .test.ts, etc.
     /\.spec\./, // .spec.js, .spec.ts, etc.
-    /\/test\./, // files starting with test.
-    /\/spec\./, // files starting with spec.
+    /(^|\/)test\./, // files starting with test. (root or in any directory)
+    /(^|\/)spec\./, // files starting with spec. (root or in any directory)
     /\.config\./, // config files (.eslintrc.js, jest.config.js, etc.)
     /\/\.github\//, // GitHub workflow files
     /\/docs?\//, // doc/ or docs/ directories
