@@ -5,21 +5,25 @@ import * as fs from 'fs';
 import semver from 'semver';
 
 /**
- * Colors for console output
+ * Log a message using GitHub Actions core logging
  */
-const colors = {
-  red: '\x1b[31m',
-  green: '\x1b[32m',
-  yellow: '\x1b[33m',
-  blue: '\x1b[34m',
-  reset: '\x1b[0m'
-};
-
-/**
- * Log a message with color and emoji
- */
-function logMessage(message, color = colors.blue) {
-  console.log(`${color}${message}${colors.reset}`);
+function logMessage(message, level = 'info') {
+  switch (level) {
+    case 'error':
+      core.error(message);
+      break;
+    case 'warning':
+      core.warning(message);
+      break;
+    case 'debug':
+      core.debug(message);
+      break;
+    case 'notice':
+      core.notice(message);
+      break;
+    default:
+      core.info(message);
+  }
 }
 
 /**
@@ -170,12 +174,12 @@ function compareVersions(current, previous) {
  */
 async function fetchTags() {
   try {
-    logMessage('🏷️  Fetching git tags...', colors.blue);
+    logMessage('🏷️  Fetching git tags...');
     await execGit(['fetch', '--tags']);
-    logMessage('✅ Git tags fetched successfully', colors.green);
+    logMessage('✅ Git tags fetched successfully');
   } catch (error) {
     core.warning(`Could not fetch git tags: ${error.message}. Some version comparisons may be limited.`);
-    logMessage(`⚠️  Warning: Could not fetch git tags: ${error.message}`, colors.yellow);
+    logMessage(`⚠️  Warning: Could not fetch git tags: ${error.message}`, 'warning');
   }
 }
 
@@ -205,17 +209,17 @@ async function run() {
 
     // Check if we should run based on file changes
     if (!skipFilesCheck && github.context.eventName === 'pull_request') {
-      logMessage('📁 Checking files changed in PR...', colors.blue);
+      logMessage('📁 Checking files changed in PR...');
 
       const changedFiles = await getChangedFiles();
       logMessage(`Files changed: ${changedFiles.join(', ')}`);
 
       if (!hasRelevantFileChanges(changedFiles)) {
-        logMessage('⏭️  No JavaScript/TypeScript or package files changed, skipping version check', colors.yellow);
+        logMessage('⏭️  No JavaScript/TypeScript or package files changed, skipping version check', 'warning');
         return;
       }
 
-      logMessage('✅ JavaScript/TypeScript or package files changed, proceeding with version check...', colors.green);
+      logMessage('✅ JavaScript/TypeScript or package files changed, proceeding with version check...');
       const relevantFiles = changedFiles.filter(file => {
         const relevantExtensions = /\.(js|ts|jsx|tsx|json)$/;
         const packageFiles = /package.*\.json$/;
@@ -235,27 +239,27 @@ async function run() {
     const packageJson = readPackageJson(packagePath);
     const currentVersion = packageJson.version;
 
-    logMessage(`📦 Current version: ${currentVersion}`, colors.blue);
+    logMessage(`📦 Current version: ${currentVersion}`);
     core.setOutput('current-version', currentVersion);
 
     // Get latest tag
-    logMessage('🏷️  Fetching git tags...', colors.blue);
+    logMessage('🏷️  Fetching git tags...');
     const latestTag = await getLatestVersionTag(tagPrefix);
 
     if (!latestTag) {
-      logMessage('🎉 No previous version tag found, this appears to be the first release.', colors.yellow);
-      logMessage('✅ Version check passed - first release', colors.green);
+      logMessage('🎉 No previous version tag found, this appears to be the first release.', 'notice');
+      logMessage('✅ Version check passed - first release');
       core.setOutput('version-changed', 'true');
       return;
     }
 
     // Extract version from tag
     const latestVersion = latestTag.replace(tagPrefix, '');
-    logMessage(`🔖 Latest released version: ${latestVersion} (tag: ${latestTag})`, colors.blue);
+    logMessage(`🔖 Latest released version: ${latestVersion} (tag: ${latestTag})`);
     core.setOutput('previous-version', latestVersion);
 
     // Compare versions
-    logMessage('⚖️  Comparing versions...', colors.blue);
+    logMessage('⚖️  Comparing versions...');
     const comparison = compareVersions(currentVersion, latestVersion);
 
     switch (comparison) {
@@ -265,7 +269,7 @@ async function run() {
         );
         logMessage(
           "💡 HINT: Run 'npm version patch', 'npm version minor', or 'npm version major' to increment the version",
-          colors.yellow
+          'notice'
         );
         return;
 
@@ -275,18 +279,18 @@ async function run() {
         );
         logMessage(
           '💡 HINT: Version should be higher than the previous release. Consider using semantic versioning.',
-          colors.yellow
+          'notice'
         );
         return;
 
       case 'higher':
-        logMessage(`✅ Version has been properly incremented from ${latestVersion} to ${currentVersion}`, colors.green);
-        logMessage('🎯 Semantic versioning check passed!', colors.green);
+        logMessage(`✅ Version has been properly incremented from ${latestVersion} to ${currentVersion}`);
+        logMessage('🎯 Semantic versioning check passed!');
         core.setOutput('version-changed', 'true');
         break;
     }
 
-    logMessage('🏁 Version check completed successfully', colors.green);
+    logMessage('🏁 Version check completed successfully');
   } catch (error) {
     core.setFailed(`Action failed with error: ${error.message}`);
   }
