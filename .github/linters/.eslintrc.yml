@@ -1,37 +1,37 @@
 env:
-  commonjs: true
-  es6: true
-  jest: true
   node: true
+  es2021: true
+  jest: true
 
 extends:
   - eslint:recommended
   - plugin:github/recommended
   - plugin:jest/recommended
-
-globals:
-  Atomics: readonly
-  SharedArrayBuffer: readonly
+  - plugin:prettier/recommended
 
 ignorePatterns:
-  - '!.*'
-  - '**/node_modules/**'
-  - '**/dist/**'
-  - '**/coverage/**'
-  - '*.json'
+  - 'node_modules/'
+  - 'dist/'
+  - 'coverage/'
+  - '.nyc_output/'
+  - '*.min.js'
 
 parserOptions:
-  ecmaVersion: 2023
+  ecmaVersion: 12
   sourceType: module
 
 rules:
-  camelcase: 'off'
-  eslint-comments/no-use: 'off'
-  eslint-comments/no-unused-disable: 'off'
   i18n-text/no-en: 'off'
-  import/no-commonjs: 'off'
-  import/no-namespace: 'off'
-  no-console: 'off'
-  no-unused-vars: 'error'
-  prettier/prettier: 'error'
-  semi: 'error'
+  quotes:
+    - error
+    - single
+    - allowTemplateLiterals: true
+  semi:
+    - error
+    - always
+  no-unused-vars:
+    - error
+    - argsIgnorePattern: '^_'
+  no-console: warn
+  prefer-const: error
+  no-var: error
