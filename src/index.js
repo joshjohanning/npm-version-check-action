@@ -233,6 +233,14 @@ async function run() {
     logMessage(`Tag prefix: ${tagPrefix}`);
     logMessage(`Skip files check: ${skipFilesCheck}`);
 
+    // This action only works on pull request events
+    if (github.context.eventName !== 'pull_request') {
+      logMessage(
+        `⏭️  This action is designed for pull_request events. Current event: ${github.context.eventName}. Skipping version check.`
+      );
+      return;
+    }
+
     // Fetch git tags to ensure they're available for version comparison
     await fetchTags();
 
@@ -242,7 +250,7 @@ async function run() {
     core.setOutput('previous-version', '');
 
     // Check if we should run based on file changes
-    if (!skipFilesCheck && github.context.eventName === 'pull_request') {
+    if (!skipFilesCheck) {
       logMessage('📁 Checking files changed in PR...');
 
       const changedFiles = await getChangedFiles();
@@ -291,7 +299,7 @@ async function run() {
           `❌ ERROR: Package version (${currentVersion}) is the same as the latest release. You need to increment it.`
         );
         logMessage(
-          "💡 HINT: Run 'npm version patch', 'npm version minor', or 'npm version major' to increment the version",
+          `💡 HINT: Run 'npm version patch', 'npm version minor', or 'npm version major' to increment the version`,
           'notice'
         );
         return;
