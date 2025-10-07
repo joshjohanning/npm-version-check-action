@@ -291,7 +291,7 @@ async function run() {
           `❌ ERROR: Package version (${currentVersion}) is the same as the latest release. You need to increment it.`
         );
         logMessage(
-          "💡 HINT: Run 'npm version patch', 'npm version minor', or 'npm version major' to increment the version",
+          `💡 HINT: Run 'npm version patch', 'npm version minor', or 'npm version major' to increment the version`,
           'notice'
         );
         return;
