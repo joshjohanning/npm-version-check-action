@@ -22,6 +22,11 @@ parserOptions:
 
 rules:
   i18n-text/no-en: 'off'
+  camelcase: 'off' # GitHub API uses snake_case properties
+  object-shorthand: 'off' # Allow explicit property syntax for clarity
+  import/no-commonjs: 'error' # Using ES modules, not CommonJS
+  import/no-namespace: 'off' # Allow * namespace imports for ES modules
+  import/no-unresolved: 'off' # False positives for packages in node_modules; Node.js resolves imports correctly
   quotes:
     - error
     - single
