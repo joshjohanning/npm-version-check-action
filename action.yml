@@ -15,7 +15,7 @@ inputs:
     required: false
     default: 'v'
   skip-files-check:
-    description: 'Skip checking if JS/package files changed (always run version check)'
+    description: 'Always run version check regardless of which files changed. Default (false) only checks if project source files changed, skipping when only tests/docs/configs are modified'
     required: false
     default: 'false'
 
