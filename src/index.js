@@ -245,8 +245,7 @@ export function isRelevantFile(file) {
     return true;
   }
 
-  // Include only JavaScript/TypeScript files that aren't excluded above
-  // (exclude .json files that aren't package files)
+  // At this point, include only JavaScript/TypeScript files (package files were already handled above)
   return JS_TS_EXTENSIONS.some(ext => file.endsWith(ext));
 }
 
