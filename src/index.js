@@ -188,7 +188,7 @@ export async function getChangedFiles() {
 export function isRelevantFile(file) {
   const relevantExtensions = /\.(js|ts|jsx|tsx|json)$/;
   // More specific pattern to avoid ReDoS - matches package.json, package-lock.json, etc.
-  const packageFiles = /^(?:.*\/)?package(?:-[a-z0-9-]+)?\.json$/;
+  const packageFiles = /^(.*\/)?package(-[a-z0-9-]+)?\.json$/;
 
   // Must have relevant extension
   if (!relevantExtensions.test(file)) {
