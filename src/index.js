@@ -266,7 +266,7 @@ export function hasRelevantFileChanges(changedFiles) {
  *
  * @param {string} packagePath - The file system path to the package.json file.
  * @returns {Object} The parsed contents of the package.json file as a JavaScript object.
- * @throws {Error} If the file does not exist, contains invalid JSON, or lacks a version field.
+ * @throws {Error} If the file does not exist, contains invalid JSON, or if the file lacks a version field (throws "Could not extract version from ${packagePath}").
  */
 export function readPackageJson(packagePath) {
   try {
