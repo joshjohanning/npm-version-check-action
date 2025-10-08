@@ -130,6 +130,10 @@ describe('npm Version Check Action - Helper Functions', () => {
       expect(isRelevantFile('packages/utils/package-lock.json')).toBe(true);
       expect(isRelevantFile('my-package.json')).toBe(false); // Should not match
       expect(isRelevantFile('packagejson')).toBe(false); // Should not match
+      expect(isRelevantFile('some-package.json')).toBe(false); // Should not match
+      expect(isRelevantFile('custom-package-lock.json')).toBe(false); // Should not match
+      expect(isRelevantFile('nested/path/package.json')).toBe(true); // Should match exact filename
+      expect(isRelevantFile('deep/nested/path/package-lock.json')).toBe(true); // Should match exact filename
     });
 
     test('should handle package.json pattern without ReDoS vulnerability', () => {

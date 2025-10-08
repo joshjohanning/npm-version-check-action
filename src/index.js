@@ -232,12 +232,9 @@ export function isRelevantFile(file) {
   }
 
   // Include package.json files (package.json, package-lock.json, etc.)
-  if (
-    file.endsWith('/package.json') ||
-    file === 'package.json' ||
-    file.endsWith('/package-lock.json') ||
-    file === 'package-lock.json'
-  ) {
+  // Check if the filename after the last slash is exactly package.json or package-lock.json
+  const fileName = file.split('/').pop();
+  if (fileName === 'package.json' || fileName === 'package-lock.json') {
     return true;
   }
 
