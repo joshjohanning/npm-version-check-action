@@ -156,10 +156,10 @@ export async function getChangedFiles() {
  * Check if a single file is relevant for version checking (excluding test files)
  */
 export function isRelevantFile(file) {
-  const relevantExtensions = /\.(js|ts|jsx|tsx|json)$/;
+  const relevantExtensions = ['.js', '.ts', '.jsx', '.tsx', '.json'];
 
   // Must have relevant extension
-  if (!relevantExtensions.test(file)) {
+  if (!relevantExtensions.some(ext => file.endsWith(ext))) {
     return false;
   }
 
