@@ -188,7 +188,9 @@ export function isRelevantFile(file) {
   const matchesDirectory = dirName => {
     // Split the file path into segments and check for exact directory name match
     const segments = file.split('/');
-    return segments.includes(dirName);
+    // Check if any path segment (excluding the filename) exactly matches the directory name
+    const directorySegments = segments.slice(0, -1); // Remove filename
+    return directorySegments.includes(dirName);
   };
 
   // Helper function to check if file matches a file pattern
