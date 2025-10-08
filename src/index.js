@@ -11,6 +11,29 @@ const SHA_PATTERN = /^[a-f0-9]{7,40}$/i;
 // Pattern to detect shell metacharacters and other dangerous characters for command injection prevention
 const SHELL_INJECTION_CHARS = /[;&|`$()'"<>]/;
 
+// File relevance checking constants
+const JS_TS_EXTENSIONS = ['.js', '.ts', '.jsx', '.tsx'];
+const RELEVANT_EXTENSIONS = [...JS_TS_EXTENSIONS, '.json'];
+const EXCLUDED_DIRECTORIES = [
+  'test',
+  'tests',
+  '__tests__',
+  'doc',
+  'docs',
+  'example',
+  'examples',
+  'script',
+  'scripts',
+  '.github',
+  '.vscode',
+  'coverage',
+  'dist',
+  'build',
+  'node_modules'
+];
+const EXCLUDED_FILE_PATTERNS = ['.test.', '.spec.', '.config.'];
+const EXCLUDED_FILE_START_PATTERNS = ['test.', 'spec.'];
+
 /**
  * Log a message using GitHub Actions core logging
  */
@@ -177,10 +200,8 @@ export async function getChangedFiles() {
  * Check if a single file is relevant for version checking (excluding test files)
  */
 export function isRelevantFile(file) {
-  const relevantExtensions = ['.js', '.ts', '.jsx', '.tsx', '.json'];
-
   // Must have relevant extension
-  if (!relevantExtensions.some(ext => file.endsWith(ext))) {
+  if (!RELEVANT_EXTENSIONS.some(ext => file.endsWith(ext))) {
     return false;
   }
 
@@ -196,29 +217,6 @@ export function isRelevantFile(file) {
   // Helper function to check if file matches a file pattern
   const matchesFilePattern = pattern => file.includes(pattern);
 
-  // Define excluded directories and patterns
-  const excludedDirectories = [
-    'test',
-    'tests',
-    '__tests__',
-    'doc',
-    'docs',
-    'example',
-    'examples',
-    'script',
-    'scripts',
-    '.github',
-    '.vscode',
-    'coverage',
-    'dist',
-    'build',
-    'node_modules'
-  ];
-
-  const excludedFilePatterns = ['.test.', '.spec.', '.config.'];
-
-  const excludedFileStartPatterns = ['test.', 'spec.'];
-
   // Helper function to check if filename starts with a pattern
   const filenameStartsWith = pattern => {
     const fileName = file.split('/').pop();
@@ -227,9 +225,9 @@ export function isRelevantFile(file) {
 
   // Check if file should be excluded
   const isTestOrNonProdFile =
-    excludedDirectories.some(matchesDirectory) ||
-    excludedFilePatterns.some(matchesFilePattern) ||
-    excludedFileStartPatterns.some(filenameStartsWith);
+    EXCLUDED_DIRECTORIES.some(matchesDirectory) ||
+    EXCLUDED_FILE_PATTERNS.some(matchesFilePattern) ||
+    EXCLUDED_FILE_START_PATTERNS.some(filenameStartsWith);
 
   // Exclude test files and other non-production files
   if (isTestOrNonProdFile) {
@@ -249,8 +247,7 @@ export function isRelevantFile(file) {
 
   // Include only JavaScript/TypeScript files that aren't excluded above
   // (exclude .json files that aren't package files)
-  const jsTypeScriptExtensions = ['.js', '.ts', '.jsx', '.tsx'];
-  return jsTypeScriptExtensions.some(ext => file.endsWith(ext));
+  return JS_TS_EXTENSIONS.some(ext => file.endsWith(ext));
 }
 
 /**
