@@ -2,12 +2,44 @@ import * as core from '@actions/core';
 import * as exec from '@actions/exec';
 import * as github from '@actions/github';
 import * as fs from 'fs';
+import * as path from 'path';
 import semver from 'semver';
+
+// Shared constants for validation
+const SAFE_GIT_COMMANDS = ['diff', 'fetch', 'tag'];
+const SAFE_GIT_OPTIONS = ['-l', '--name-only', '--tags'];
+const SHA_PATTERN = /^[a-f0-9]{7,40}$/i;
+// Pattern to detect shell metacharacters and other dangerous characters for command injection prevention
+const SHELL_INJECTION_CHARS = /[;&|`$()'"<>]/;
+
+// File relevance checking constants
+const JS_TS_EXTENSIONS = ['.js', '.ts', '.jsx', '.tsx'];
+const RELEVANT_EXTENSIONS = [...JS_TS_EXTENSIONS, '.json'];
+const EXCLUDED_DIRECTORIES = [
+  'test',
+  'tests',
+  '__tests__',
+  'doc',
+  'docs',
+  'example',
+  'examples',
+  'script',
+  'scripts',
+  '.github',
+  '.vscode',
+  'coverage',
+  'dist',
+  'build',
+  'node_modules'
+];
+const EXCLUDED_FILE_PATTERNS = ['.test.', '.spec.', '.config.'];
+const EXCLUDED_FILE_START_PATTERNS = ['test.', 'spec.'];
+const PACKAGE_FILENAMES = ['package.json', 'package-lock.json'];
 
 /**
  * Log a message using GitHub Actions core logging
  */
-function logMessage(message, level = 'info') {
+export function logMessage(message, level = 'info') {
   switch (level) {
     case 'error':
       core.error(message);
@@ -29,7 +61,7 @@ function logMessage(message, level = 'info') {
 /**
  * Execute a git command and return the output
  */
-async function execGit(args) {
+export async function execGit(args) {
   let output = '';
   let error = '';
 
@@ -46,7 +78,52 @@ async function execGit(args) {
   };
 
   try {
-    await exec.exec('git', args, options);
+    // Comprehensive validation and sanitization for GHAS compliance
+    // Ensure args array is not empty before processing
+    if (!args || args.length === 0) {
+      throw new Error('Git command arguments cannot be empty');
+    }
+
+    // This ensures GHAS sees explicit validation before exec
+    const sanitizedArgs = args.map((arg, index) => {
+      if (typeof arg !== 'string') {
+        throw new Error('All git arguments must be strings');
+      }
+
+      // First argument must be a whitelisted git command
+      if (index === 0 && !SAFE_GIT_COMMANDS.includes(arg)) {
+        throw new Error(`Unsupported git command: ${arg}`);
+      }
+
+      // Allow known safe options
+      if (SAFE_GIT_OPTIONS.includes(arg)) {
+        return arg;
+      }
+
+      // Allow SHA hashes (for baseRef/headRef) - inline validation for GHAS
+      if (SHA_PATTERN.test(arg)) {
+        return arg;
+      }
+
+      // Reject dangerous git options that could execute commands
+      if (arg.includes('--upload-pack') || arg.includes('--receive-pack') || arg.includes('--exec')) {
+        throw new Error(`Dangerous git option detected: ${arg}`);
+      }
+
+      // Reject any argument that contains shell metacharacters
+      if (SHELL_INJECTION_CHARS.test(arg)) {
+        throw new Error(`Argument contains shell metacharacters: ${arg}`);
+      }
+
+      // Reject any other options that start with dash (not in whitelist)
+      if (arg.startsWith('-')) {
+        throw new Error(`Potentially dangerous git option: ${arg}`);
+      }
+
+      return arg; // Return the clean argument
+    });
+
+    await exec.exec('git', sanitizedArgs, options);
     return output.trim();
   } catch (err) {
     if (error) {
@@ -57,9 +134,54 @@ async function execGit(args) {
 }
 
 /**
+ * Sanitize and validate SHA values to prevent command injection
+ *
+ * This function ensures that SHA values used in git commands are safe by:
+ * - Validating the input is a non-empty string
+ * - Trimming whitespace
+ * - Verifying the SHA format (7-40 hexadecimal characters)
+ * - Checking for dangerous shell metacharacters
+ *
+ * @param {string} sha - The SHA value to sanitize and validate
+ * @param {string} refName - A descriptive name for the reference (used in error messages)
+ * @returns {string} The cleaned and validated SHA value
+ * @throws {Error} When sha is null, undefined, or not a string
+ * @throws {Error} When sha format is invalid (not 7-40 hex characters)
+ * @throws {Error} When sha contains shell metacharacters that could be used for injection
+ *
+ * @example
+ * const cleanSha = sanitizeSHA('a1b2c3d4e5f6', 'baseRef');
+ * // Returns: 'a1b2c3d4e5f6'
+ *
+ * @example
+ * sanitizeSHA('invalid; rm -rf /', 'headRef');
+ * // Throws: Error: Invalid headRef: contains dangerous characters
+ */
+export function sanitizeSHA(sha, refName) {
+  if (!sha || typeof sha !== 'string') {
+    throw new Error(`Invalid ${refName}: must be a non-empty string`);
+  }
+
+  // Remove any whitespace but preserve original case
+  const cleanSha = sha.trim();
+
+  // Validate SHA format (7-40 hex characters) using shared pattern
+  if (!SHA_PATTERN.test(cleanSha)) {
+    throw new Error(`Invalid ${refName} format: ${cleanSha}. Must be a valid git SHA (7-40 hex characters)`);
+  }
+
+  // Additional safety: ensure no shell metacharacters using shared pattern
+  if (SHELL_INJECTION_CHARS.test(cleanSha)) {
+    throw new Error(`Invalid ${refName}: contains dangerous characters`);
+  }
+
+  return cleanSha;
+}
+
+/**
  * Get files changed in the current PR
  */
-async function getChangedFiles() {
+export async function getChangedFiles() {
   const context = github.context;
 
   if (context.eventName !== 'pull_request') {
@@ -73,67 +195,85 @@ async function getChangedFiles() {
     throw new Error('Could not determine base and head refs for PR');
   }
 
-  const output = await execGit(['diff', '--name-only', baseRef, headRef]);
+  // Sanitize SHA values to prevent command injection
+  const sanitizedBaseRef = sanitizeSHA(baseRef, 'baseRef');
+  const sanitizedHeadRef = sanitizeSHA(headRef, 'headRef');
+
+  const output = await execGit(['diff', '--name-only', sanitizedBaseRef, sanitizedHeadRef]);
   return output ? output.split('\n') : [];
 }
 
 /**
  * Check if a single file is relevant for version checking (excluding test files)
  */
-function isRelevantFile(file) {
-  const relevantExtensions = /\.(js|ts|jsx|tsx|json)$/;
-  const packageFiles = /package.*\.json$/;
+export function isRelevantFile(file) {
+  // Extract file extension once for performance
+  const fileExtension = path.extname(file);
 
   // Must have relevant extension
-  if (!relevantExtensions.test(file)) {
+  if (!RELEVANT_EXTENSIONS.includes(fileExtension)) {
     return false;
   }
 
-  // Patterns for test files and directories to exclude
-  const testPatterns = [
-    /\/tests?\//, // test/ or tests/ directories
-    /\/__tests__\//, // __tests__ directories (Jest convention)
-    /\.test\./, // .test.js, .test.ts, etc.
-    /\.spec\./, // .spec.js, .spec.ts, etc.
-    /(^|\/)test\./, // files starting with test. (root or in any directory)
-    /(^|\/)spec\./, // files starting with spec. (root or in any directory)
-    /\.config\./, // config files (.eslintrc.js, jest.config.js, etc.)
-    /\/\.github\//, // GitHub workflow files
-    /\/docs?\//, // doc/ or docs/ directories
-    /\/examples?\//, // example/ or examples/ directories
-    /\/scripts?\//, // script/ or scripts/ directories
-    /\/\.vscode\//, // VS Code settings
-    /\/coverage\//, // coverage reports
-    /\/dist\//, // build output
-    /\/build\//, // build output
-    /\/node_modules\// // dependencies
-  ];
+  // Helper function to check if file matches a directory pattern
+  const matchesDirectory = dirName => {
+    // Split the file path into segments and check for exact directory name match
+    const segments = file.split('/');
+    // Check if any path segment (excluding the filename) exactly matches the directory name
+    const directorySegments = segments.slice(0, -1); // Remove filename
+    return directorySegments.includes(dirName);
+  };
+
+  // Helper function to check if file matches a file pattern
+  const matchesFilePattern = pattern => file.includes(pattern);
+
+  // Helper function to check if filename starts with a pattern
+  const filenameStartsWith = pattern => {
+    const fileName = path.basename(file);
+    return fileName.startsWith(pattern);
+  };
+
+  // Check if file should be excluded
+  const isTestOrNonProdFile =
+    EXCLUDED_DIRECTORIES.some(matchesDirectory) ||
+    EXCLUDED_FILE_PATTERNS.some(matchesFilePattern) ||
+    EXCLUDED_FILE_START_PATTERNS.some(filenameStartsWith);
 
   // Exclude test files and other non-production files
-  if (testPatterns.some(pattern => pattern.test(file))) {
+  if (isTestOrNonProdFile) {
     return false;
   }
 
-  // Include package.json files
-  if (packageFiles.test(file)) {
+  // Helper function to check if file is a package file
+  const isPackageFile = filePath => {
+    const fileName = path.basename(filePath);
+    return PACKAGE_FILENAMES.includes(fileName);
+  };
+
+  // Include package.json files (package.json, package-lock.json, etc.)
+  if (isPackageFile(file)) {
     return true;
   }
 
-  // Include JavaScript/TypeScript files that aren't excluded above
-  return file.endsWith('.js') || file.endsWith('.ts') || file.endsWith('.jsx') || file.endsWith('.tsx');
+  // At this point, include only JavaScript/TypeScript files (package files were already handled above)
+  return JS_TS_EXTENSIONS.includes(fileExtension);
 }
 
 /**
  * Check if any JavaScript/TypeScript or package files were changed (excluding test files)
  */
-function hasRelevantFileChanges(changedFiles) {
+export function hasRelevantFileChanges(changedFiles) {
   return changedFiles.some(file => isRelevantFile(file));
 }
 
 /**
- * Read and parse package.json
+ * Reads and parses a package.json file from the specified path.
+ *
+ * @param {string} packagePath - The file system path to the package.json file.
+ * @returns {Object} The parsed contents of the package.json file as a JavaScript object.
+ * @throws {Error} If the file does not exist, contains invalid JSON, or if the file lacks a version field (throws "Could not extract version from ${packagePath}").
  */
-function readPackageJson(packagePath) {
+export function readPackageJson(packagePath) {
   try {
     if (!fs.existsSync(packagePath)) {
       throw new Error(`package.json not found at path: ${packagePath}`);
@@ -156,9 +296,13 @@ function readPackageJson(packagePath) {
 }
 
 /**
- * Get the latest version tag from git
+ * Retrieves the latest version tag from git that matches the specified prefix.
+ *
+ * @param {string} tagPrefix - The prefix to filter version tags (e.g., 'v' for tags like 'v1.2.3').
+ * @returns {Promise<string|null>} The latest version tag matching the prefix, or null if none found.
+ * @throws {Error} If fetching or parsing git tags fails.
  */
-async function getLatestVersionTag(tagPrefix) {
+export async function getLatestVersionTag(tagPrefix) {
   try {
     // Fetch all tags
     await execGit(['fetch', '--tags']);
@@ -191,7 +335,7 @@ async function getLatestVersionTag(tagPrefix) {
 /**
  * Compare two semantic versions
  */
-function compareVersions(current, previous) {
+export function compareVersions(current, previous) {
   const comparison = semver.compare(current, previous);
 
   if (comparison > 0) {
@@ -204,9 +348,15 @@ function compareVersions(current, previous) {
 }
 
 /**
- * Fetch git tags to ensure they're available in shallow clones
+ * Fetch git tags to ensure they're available in shallow clones.
+ *
+ * Runs 'git fetch --tags' to retrieve all tags from the remote repository.
+ * Logs the process and handles errors by issuing a warning instead of throwing.
+ * This function is designed to be non-blocking and will not fail the action if git tags cannot be fetched.
+ *
+ * @returns {Promise<void>} Resolves when tags have been fetched or a warning has been logged.
  */
-async function fetchTags() {
+export async function fetchTags() {
   try {
     logMessage('🏷️  Fetching git tags...');
     await execGit(['fetch', '--tags']);
@@ -220,7 +370,14 @@ async function fetchTags() {
 /**
  * Main action logic
  */
-async function run() {
+/**
+ * Main entry point for the GitHub Action.
+ *
+ * This function orchestrates the version check workflow for npm packages in pull request events.
+ * It validates the package version, compares it with existing git tags, and ensures versioning best practices.
+ * Designed to be invoked automatically by GitHub Actions.
+ */
+export async function run() {
   try {
     logMessage('🔍 npm Version Check Action');
 
