@@ -81,7 +81,7 @@ export async function getChangedFiles() {
  * Helper function to create directory exclusion patterns
  */
 export function createDirectoryPatterns(directories) {
-  return directories.map(dir => new RegExp(`(^|\\/)${dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\/`));
+  return directories.map(dir => new RegExp(`(^|\\/)${dir.replace(/[.\\*+?^${}()|[\]]/g, '\\$&')}\\/`));
 }
 
 /**
@@ -106,7 +106,7 @@ export function isRelevantFile(file) {
     /(^|\/)spec\./, // files starting with spec. (root or in any directory)
     /\.config\./, // config files (.eslintrc.js, jest.config.js, etc.)
     ...createDirectoryPatterns([
-      '\\.github', 'docs?', 'examples?', 'scripts?', '\\.vscode', 
+      '.github', 'docs?', 'examples?', 'scripts?', '.vscode', 
       'coverage', 'dist', 'build', 'node_modules'
     ])
   ];

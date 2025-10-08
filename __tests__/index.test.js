@@ -80,7 +80,7 @@ describe('npm Version Check Action - Helper Functions', () => {
 
     test('should handle special regex characters in directory names', () => {
       const { createDirectoryPatterns } = indexModule;
-      const patterns = createDirectoryPatterns(['\\.github', '\\.vscode']);
+      const patterns = createDirectoryPatterns(['.github', '.vscode']);
       
       expect(patterns[0].test('.github/workflows/test.yml')).toBe(true);
       expect(patterns[1].test('.vscode/settings.json')).toBe(true);
