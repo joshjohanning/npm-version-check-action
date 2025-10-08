@@ -105,6 +105,27 @@ export async function execGit(args) {
 
 /**
  * Sanitize and validate SHA values to prevent command injection
+ *
+ * This function ensures that SHA values used in git commands are safe by:
+ * - Validating the input is a non-empty string
+ * - Trimming whitespace
+ * - Verifying the SHA format (7-40 hexadecimal characters)
+ * - Checking for dangerous shell metacharacters
+ *
+ * @param {string} sha - The SHA value to sanitize and validate
+ * @param {string} refName - A descriptive name for the reference (used in error messages)
+ * @returns {string} The cleaned and validated SHA value
+ * @throws {Error} When sha is null, undefined, or not a string
+ * @throws {Error} When sha format is invalid (not 7-40 hex characters)
+ * @throws {Error} When sha contains shell metacharacters that could be used for injection
+ *
+ * @example
+ * const cleanSha = sanitizeSHA('a1b2c3d4e5f6', 'baseRef');
+ * // Returns: 'a1b2c3d4e5f6'
+ *
+ * @example
+ * sanitizeSHA('invalid; rm -rf /', 'headRef');
+ * // Throws: Error: Invalid headRef: contains dangerous characters
  */
 export function sanitizeSHA(sha, refName) {
   if (!sha || typeof sha !== 'string') {
