@@ -344,9 +344,9 @@ export function compareVersions(current, previous) {
  *
  * Runs 'git fetch --tags' to retrieve all tags from the remote repository.
  * Logs the process and handles errors by issuing a warning instead of throwing.
+ * This function is designed to be non-blocking and will not fail the action if git tags cannot be fetched.
  *
  * @returns {Promise<void>} Resolves when tags have been fetched or a warning has been logged.
- * @throws Does not throw; logs a warning if fetching tags fails.
  */
 export async function fetchTags() {
   try {
