@@ -164,8 +164,15 @@ export function isRelevantFile(file) {
   }
 
   // Helper function to check if file matches a directory pattern
-  const matchesDirectory = dirName =>
-    file.includes(`/${dirName}/`) || file.startsWith(`${dirName}/`) || file === dirName;
+  const matchesDirectory = dirName => {
+    // Check if file is in a directory with exact name match
+    if (file.includes(`/${dirName}/`)) return true;
+    // Check if file is at root level in directory (exact directory name followed by slash)
+    if (file.startsWith(`${dirName}/`)) return true;
+    // Check if file is exactly the directory name (for directory-only entries)
+    if (file === dirName) return true;
+    return false;
+  };
 
   // Helper function to check if file matches a file pattern
   const matchesFilePattern = pattern => file.includes(pattern);
