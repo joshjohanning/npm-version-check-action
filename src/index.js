@@ -7,7 +7,7 @@ import semver from 'semver';
 /**
  * Log a message using GitHub Actions core logging
  */
-function logMessage(message, level = 'info') {
+export function logMessage(message, level = 'info') {
   switch (level) {
     case 'error':
       core.error(message);
@@ -29,7 +29,7 @@ function logMessage(message, level = 'info') {
 /**
  * Execute a git command and return the output
  */
-async function execGit(args) {
+export async function execGit(args) {
   let output = '';
   let error = '';
 
@@ -59,7 +59,7 @@ async function execGit(args) {
 /**
  * Get files changed in the current PR
  */
-async function getChangedFiles() {
+export async function getChangedFiles() {
   const context = github.context;
 
   if (context.eventName !== 'pull_request') {
@@ -80,7 +80,7 @@ async function getChangedFiles() {
 /**
  * Check if a single file is relevant for version checking (excluding test files)
  */
-function isRelevantFile(file) {
+export function isRelevantFile(file) {
   const relevantExtensions = /\.(js|ts|jsx|tsx|json)$/;
   const packageFiles = /package.*\.json$/;
 
@@ -126,14 +126,14 @@ function isRelevantFile(file) {
 /**
  * Check if any JavaScript/TypeScript or package files were changed (excluding test files)
  */
-function hasRelevantFileChanges(changedFiles) {
+export function hasRelevantFileChanges(changedFiles) {
   return changedFiles.some(file => isRelevantFile(file));
 }
 
 /**
  * Read and parse package.json
  */
-function readPackageJson(packagePath) {
+export function readPackageJson(packagePath) {
   try {
     if (!fs.existsSync(packagePath)) {
       throw new Error(`package.json not found at path: ${packagePath}`);
@@ -158,7 +158,7 @@ function readPackageJson(packagePath) {
 /**
  * Get the latest version tag from git
  */
-async function getLatestVersionTag(tagPrefix) {
+export async function getLatestVersionTag(tagPrefix) {
   try {
     // Fetch all tags
     await execGit(['fetch', '--tags']);
@@ -191,7 +191,7 @@ async function getLatestVersionTag(tagPrefix) {
 /**
  * Compare two semantic versions
  */
-function compareVersions(current, previous) {
+export function compareVersions(current, previous) {
   const comparison = semver.compare(current, previous);
 
   if (comparison > 0) {
@@ -206,7 +206,7 @@ function compareVersions(current, previous) {
 /**
  * Fetch git tags to ensure they're available in shallow clones
  */
-async function fetchTags() {
+export async function fetchTags() {
   try {
     logMessage('🏷️  Fetching git tags...');
     await execGit(['fetch', '--tags']);
@@ -220,7 +220,7 @@ async function fetchTags() {
 /**
  * Main action logic
  */
-async function run() {
+export async function run() {
   try {
     logMessage('🔍 npm Version Check Action');
 
