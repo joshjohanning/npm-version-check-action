@@ -70,7 +70,7 @@ export function validateGitArgs(args) {
 export async function execGit(args) {
   // Validate arguments for security
   validateGitArgs(args);
-  
+
   // Additional explicit validation for GHAS compliance
   // Ensure no arguments could enable command injection via git options
   for (const arg of args) {
@@ -163,8 +163,6 @@ export async function getChangedFiles() {
   return output ? output.split('\n') : [];
 }
 
-
-
 /**
  * Check if a single file is relevant for version checking (excluding test files)
  */
@@ -188,14 +186,14 @@ export function isRelevantFile(file) {
     /(^|\/)spec\./, // files starting with spec. (root or in any directory)
     /\.config\./, // config files (.eslintrc.js, jest.config.js, etc.)
     /(^|\/)docs?\//, // doc/ or docs/ directories
-    /(^|\/)examples?\//, // example/ or examples/ directories  
+    /(^|\/)examples?\//, // example/ or examples/ directories
     /(^|\/)scripts?\//, // script/ or scripts/ directories
     /(^|\/)\.github\//, // .github/ directory
     /(^|\/)\.vscode\//, // .vscode/ directory
     /(^|\/)coverage\//, // coverage/ directory
     /(^|\/)dist\//, // dist/ directory
     /(^|\/)build\//, // build/ directory
-    /(^|\/)node_modules\//, // node_modules/ directory
+    /(^|\/)node_modules\// // node_modules/ directory
   ];
 
   // Exclude test files and other non-production files
