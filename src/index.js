@@ -177,10 +177,8 @@ export function isRelevantFile(file) {
     file === '__tests__' ||
     // Test files (proper boundary checks)
     file.startsWith('test.') ||
-    file.endsWith('.test.') ||
     file.includes('.test.') ||
     file.startsWith('spec.') ||
-    file.endsWith('.spec.') ||
     file.includes('.spec.') ||
     // Config files
     file.includes('.config.') ||
