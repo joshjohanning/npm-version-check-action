@@ -191,7 +191,7 @@ export function isRelevantFile(file) {
     file === 'docs' ||
     // Example directories
     file.includes('/example/') ||
-    (file.startsWith('example/') && !file.startsWith('examples')) ||
+    file.startsWith('example/') ||
     file === 'example' ||
     file.includes('/examples/') ||
     file.startsWith('examples/') ||
