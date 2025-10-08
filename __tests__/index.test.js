@@ -162,29 +162,6 @@ describe('npm Version Check Action - Helper Functions', () => {
     });
   });
 
-  describe('createDirectoryPatterns', () => {
-    test('should create patterns for multiple directories', () => {
-      const { createDirectoryPatterns } = indexModule;
-      const patterns = createDirectoryPatterns(['dist', 'build', 'coverage']);
-
-      expect(patterns).toHaveLength(3);
-      expect(patterns[0].test('dist/index.js')).toBe(true);
-      expect(patterns[0].test('src/dist/index.js')).toBe(true);
-      expect(patterns[1].test('build/app.js')).toBe(true);
-      expect(patterns[2].test('coverage/report.html')).toBe(true);
-      expect(patterns[0].test('src/index.js')).toBe(false);
-    });
-
-    test('should handle special regex characters in directory names', () => {
-      const { createDirectoryPatterns } = indexModule;
-      const patterns = createDirectoryPatterns(['.github', '.vscode']);
-
-      expect(patterns[0].test('.github/workflows/test.yml')).toBe(true);
-      expect(patterns[1].test('.vscode/settings.json')).toBe(true);
-      expect(patterns[0].test('xgithub/file.js')).toBe(false); // Should not match without dot
-    });
-  });
-
   describe('isRelevantFile', () => {
     test('should identify JavaScript files as relevant', () => {
       const { isRelevantFile } = indexModule;

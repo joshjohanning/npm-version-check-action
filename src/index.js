@@ -162,14 +162,7 @@ export async function getChangedFiles() {
   return output ? output.split('\n') : [];
 }
 
-/**
- * Helper function to create directory exclusion patterns
- */
-export function createDirectoryPatterns(directories) {
-  // Standard regex escaping function
-  const escapeRegExp = str => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return directories.map(dir => new RegExp(`(^|\\/)${escapeRegExp(dir)}\\/`));
-}
+
 
 /**
  * Check if a single file is relevant for version checking (excluding test files)
@@ -193,17 +186,15 @@ export function isRelevantFile(file) {
     /(^|\/)test\./, // files starting with test. (root or in any directory)
     /(^|\/)spec\./, // files starting with spec. (root or in any directory)
     /\.config\./, // config files (.eslintrc.js, jest.config.js, etc.)
-    ...createDirectoryPatterns([
-      '.github',
-      'docs?',
-      'examples?',
-      'scripts?',
-      '.vscode',
-      'coverage',
-      'dist',
-      'build',
-      'node_modules'
-    ])
+    /(^|\/)docs?\//, // doc/ or docs/ directories
+    /(^|\/)examples?\//, // example/ or examples/ directories  
+    /(^|\/)scripts?\//, // script/ or scripts/ directories
+    /(^|\/)\.github\//, // .github/ directory
+    /(^|\/)\.vscode\//, // .vscode/ directory
+    /(^|\/)coverage\//, // coverage/ directory
+    /(^|\/)dist\//, // dist/ directory
+    /(^|\/)build\//, // build/ directory
+    /(^|\/)node_modules\//, // node_modules/ directory
   ];
 
   // Exclude test files and other non-production files
