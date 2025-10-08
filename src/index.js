@@ -27,16 +27,9 @@ export function logMessage(message, level = 'info') {
 }
 
 /**
- * Validate git arguments to prevent command injection
+ * Validate git arguments structure and whitelist commands/options
  */
 export function validateGitArgs(args) {
-  const dangerousPatterns = [
-    /--upload-pack/i,
-    /--receive-pack/i,
-    /--exec/i,
-    /[;&|`$()]/ // Shell metacharacters
-  ];
-
   // Known safe git commands and options
   const safeCommands = ['diff', 'fetch', 'tag'];
   const safeOptions = ['--name-only', '--tags', '-l'];
@@ -64,13 +57,6 @@ export function validateGitArgs(args) {
       continue;
     }
 
-    // Check for dangerous patterns
-    for (const pattern of dangerousPatterns) {
-      if (pattern.test(arg)) {
-        throw new Error(`Potentially dangerous git argument detected: ${arg}`);
-      }
-    }
-
     // Reject arguments that start with dash (except known safe options)
     if (arg.startsWith('-') && !safeOptions.includes(arg)) {
       throw new Error(`Potentially dangerous git option: ${arg}`);
@@ -84,6 +70,21 @@ export function validateGitArgs(args) {
 export async function execGit(args) {
   // Validate arguments for security
   validateGitArgs(args);
+  
+  // Additional explicit validation for GHAS compliance
+  // Ensure no arguments could enable command injection via git options
+  for (const arg of args) {
+    if (typeof arg === 'string') {
+      // Explicitly reject dangerous git options that could execute commands
+      if (arg.includes('--upload-pack') || arg.includes('--receive-pack') || arg.includes('--exec')) {
+        throw new Error(`Dangerous git option detected: ${arg}`);
+      }
+      // Reject any argument that contains shell metacharacters
+      if (/[;&|`$()]/.test(arg)) {
+        throw new Error(`Argument contains shell metacharacters: ${arg}`);
+      }
+    }
+  }
 
   let output = '';
   let error = '';

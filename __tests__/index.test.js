@@ -122,28 +122,15 @@ describe('npm Version Check Action - Helper Functions', () => {
       const { validateGitArgs } = indexModule;
 
       expect(() => validateGitArgs(['diff', '--upload-pack=/bin/sh'])).toThrow(
-        'Potentially dangerous git argument detected'
+        'Potentially dangerous git option'
       );
       expect(() => validateGitArgs(['fetch', '--receive-pack=/bin/sh'])).toThrow(
-        'Potentially dangerous git argument detected'
+        'Potentially dangerous git option'
       );
-      expect(() => validateGitArgs(['diff', '--exec=/bin/sh'])).toThrow('Potentially dangerous git argument detected');
+      expect(() => validateGitArgs(['diff', '--exec=/bin/sh'])).toThrow('Potentially dangerous git option');
     });
 
-    test('should reject shell metacharacters', () => {
-      const { validateGitArgs } = indexModule;
 
-      expect(() => validateGitArgs(['diff', 'abc123; rm -rf /'])).toThrow(
-        'Potentially dangerous git argument detected'
-      );
-      expect(() => validateGitArgs(['diff', 'abc123 && echo evil'])).toThrow(
-        'Potentially dangerous git argument detected'
-      );
-      expect(() => validateGitArgs(['diff', 'abc123 | cat /etc/passwd'])).toThrow(
-        'Potentially dangerous git argument detected'
-      );
-      expect(() => validateGitArgs(['diff', 'abc123`whoami`'])).toThrow('Potentially dangerous git argument detected');
-    });
 
     test('should reject unsupported commands', () => {
       const { validateGitArgs } = indexModule;
@@ -435,11 +422,11 @@ describe('npm Version Check Action - Integration Tests', () => {
       const { execGit } = indexModule;
 
       await expect(execGit(['diff', '--upload-pack=/bin/sh'])).rejects.toThrow(
-        'Potentially dangerous git argument detected'
+        'Potentially dangerous git option'
       );
-      await expect(execGit(['diff', '--exec=/bin/sh'])).rejects.toThrow('Potentially dangerous git argument detected');
+      await expect(execGit(['diff', '--exec=/bin/sh'])).rejects.toThrow('Potentially dangerous git option');
       await expect(execGit(['diff', 'abc123; rm -rf /'])).rejects.toThrow(
-        'Potentially dangerous git argument detected'
+        'Argument contains shell metacharacters'
       );
     });
 
@@ -456,7 +443,7 @@ describe('npm Version Check Action - Integration Tests', () => {
       const { execGit } = indexModule;
 
       await expect(execGit(['diff', '--dangerous-option'])).rejects.toThrow('Potentially dangerous git option');
-      await expect(execGit(['fetch', '--upload-pack'])).rejects.toThrow('Potentially dangerous git argument detected');
+      await expect(execGit(['fetch', '--upload-pack'])).rejects.toThrow('Potentially dangerous git option');
     });
 
     test('should allow valid SHA hashes', async () => {
