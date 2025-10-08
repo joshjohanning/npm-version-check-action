@@ -109,40 +109,6 @@ describe('npm Version Check Action - Helper Functions', () => {
     });
   });
 
-  describe('validateGitArgs', () => {
-    test('should allow safe git commands and arguments', () => {
-      const { validateGitArgs } = indexModule;
-
-      expect(() => validateGitArgs(['diff', '--name-only', 'abc1234', 'def4567'])).not.toThrow();
-      expect(() => validateGitArgs(['fetch', '--tags'])).not.toThrow();
-      expect(() => validateGitArgs(['tag', '-l'])).not.toThrow();
-    });
-
-    test('should reject dangerous arguments', () => {
-      const { validateGitArgs } = indexModule;
-
-      expect(() => validateGitArgs(['diff', '--upload-pack=/bin/sh'])).toThrow('Potentially dangerous git option');
-      expect(() => validateGitArgs(['fetch', '--receive-pack=/bin/sh'])).toThrow('Potentially dangerous git option');
-      expect(() => validateGitArgs(['diff', '--exec=/bin/sh'])).toThrow('Potentially dangerous git option');
-    });
-
-    test('should reject unsupported commands', () => {
-      const { validateGitArgs } = indexModule;
-
-      expect(() => validateGitArgs(['clone', 'https://example.com'])).toThrow('Unsupported git command: clone');
-      expect(() => validateGitArgs(['push', 'origin', 'main'])).toThrow('Unsupported git command: push');
-      expect(() => validateGitArgs(['rm', 'file.txt'])).toThrow('Unsupported git command: rm');
-    });
-
-    test('should reject non-string arguments', () => {
-      const { validateGitArgs } = indexModule;
-
-      expect(() => validateGitArgs(['diff', null])).toThrow('Git arguments must be strings');
-      expect(() => validateGitArgs(['diff', 123])).toThrow('Git arguments must be strings');
-      expect(() => validateGitArgs(['diff', {}])).toThrow('Git arguments must be strings');
-    });
-  });
-
   describe('isRelevantFile', () => {
     test('should identify JavaScript files as relevant', () => {
       const { isRelevantFile } = indexModule;
@@ -415,8 +381,8 @@ describe('npm Version Check Action - Integration Tests', () => {
     test('should reject dangerous git arguments', async () => {
       const { execGit } = indexModule;
 
-      await expect(execGit(['diff', '--upload-pack=/bin/sh'])).rejects.toThrow('Potentially dangerous git option');
-      await expect(execGit(['diff', '--exec=/bin/sh'])).rejects.toThrow('Potentially dangerous git option');
+      await expect(execGit(['diff', '--upload-pack=/bin/sh'])).rejects.toThrow('Dangerous git option detected');
+      await expect(execGit(['diff', '--exec=/bin/sh'])).rejects.toThrow('Dangerous git option detected');
       await expect(execGit(['diff', 'abc123; rm -rf /'])).rejects.toThrow('Argument contains shell metacharacters');
     });
 
@@ -433,7 +399,7 @@ describe('npm Version Check Action - Integration Tests', () => {
       const { execGit } = indexModule;
 
       await expect(execGit(['diff', '--dangerous-option'])).rejects.toThrow('Potentially dangerous git option');
-      await expect(execGit(['fetch', '--upload-pack'])).rejects.toThrow('Potentially dangerous git option');
+      await expect(execGit(['fetch', '--upload-pack'])).rejects.toThrow('Dangerous git option detected');
     });
 
     test('should allow valid SHA hashes', async () => {
@@ -443,6 +409,23 @@ describe('npm Version Check Action - Integration Tests', () => {
       // Should not throw for valid SHA patterns
       await expect(execGit(['diff', '--name-only', 'a1b2c3d', 'f4e5d6c7b8a9'])).resolves.not.toThrow();
       await expect(execGit(['diff', '--name-only', 'abc123def456', '1234567890abcdef'])).resolves.not.toThrow();
+    });
+
+    test('should reject non-string arguments', async () => {
+      const { execGit } = indexModule;
+
+      await expect(execGit(['diff', null])).rejects.toThrow('All git arguments must be strings');
+      await expect(execGit(['diff', 123])).rejects.toThrow('All git arguments must be strings');
+      await expect(execGit(['diff', {}])).rejects.toThrow('All git arguments must be strings');
+    });
+
+    test('should allow safe git commands and arguments', async () => {
+      const { execGit } = indexModule;
+      mockExec.exec.mockResolvedValue(0);
+
+      await expect(execGit(['diff', '--name-only', 'abc1234', 'def4567'])).resolves.not.toThrow();
+      await expect(execGit(['fetch', '--tags'])).resolves.not.toThrow();
+      await expect(execGit(['tag', '-l'])).resolves.not.toThrow();
     });
   });
   describe('getChangedFiles function', () => {

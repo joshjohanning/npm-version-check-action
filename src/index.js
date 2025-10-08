@@ -27,65 +27,9 @@ export function logMessage(message, level = 'info') {
 }
 
 /**
- * Validate git arguments structure and whitelist commands/options
- */
-export function validateGitArgs(args) {
-  // Known safe git commands and options
-  const safeCommands = ['diff', 'fetch', 'tag'];
-  const safeOptions = ['--name-only', '--tags', '-l'];
-  const shaPattern = /^[a-f0-9]{7,40}$/i; // Git SHA pattern
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-
-    if (typeof arg !== 'string') {
-      throw new Error('Git arguments must be strings');
-    }
-
-    // First argument should be a git command
-    if (i === 0 && !safeCommands.includes(arg)) {
-      throw new Error(`Unsupported git command: ${arg}`);
-    }
-
-    // Skip validation for known safe options
-    if (safeOptions.includes(arg)) {
-      continue;
-    }
-
-    // Allow SHA hashes (for baseRef/headRef)
-    if (shaPattern.test(arg)) {
-      continue;
-    }
-
-    // Reject arguments that start with dash (except known safe options)
-    if (arg.startsWith('-') && !safeOptions.includes(arg)) {
-      throw new Error(`Potentially dangerous git option: ${arg}`);
-    }
-  }
-}
-
-/**
  * Execute a git command and return the output
  */
 export async function execGit(args) {
-  // Validate arguments for security
-  validateGitArgs(args);
-
-  // Additional explicit validation for GHAS compliance
-  // Ensure no arguments could enable command injection via git options
-  for (const arg of args) {
-    if (typeof arg === 'string') {
-      // Explicitly reject dangerous git options that could execute commands
-      if (arg.includes('--upload-pack') || arg.includes('--receive-pack') || arg.includes('--exec')) {
-        throw new Error(`Dangerous git option detected: ${arg}`);
-      }
-      // Reject any argument that contains shell metacharacters
-      if (/[;&|`$()]/.test(arg)) {
-        throw new Error(`Argument contains shell metacharacters: ${arg}`);
-      }
-    }
-  }
-
   let output = '';
   let error = '';
 
@@ -102,20 +46,45 @@ export async function execGit(args) {
   };
 
   try {
-    // Create a sanitized copy of args for GHAS compliance
-    // This ensures GHAS sees explicit sanitization before exec
-    const sanitizedArgs = args.map(arg => {
+    // Comprehensive validation and sanitization for GHAS compliance
+    // This ensures GHAS sees explicit validation before exec
+    const safeCommands = ['diff', 'fetch', 'tag'];
+    const safeOptions = ['-l', '--name-only', '--tags'];
+    const shaPattern = /^[a-f0-9]{7,40}$/i;
+
+    const sanitizedArgs = args.map((arg, index) => {
       if (typeof arg !== 'string') {
         throw new Error('All git arguments must be strings');
       }
 
-      // Final check: ensure no dangerous patterns in sanitized args
-      if (arg.includes('--upload-pack') || arg.includes('--receive-pack') || arg.includes('--exec')) {
-        throw new Error(`Rejected dangerous git option: ${arg}`);
+      // First argument must be a whitelisted git command
+      if (index === 0 && !safeCommands.includes(arg)) {
+        throw new Error(`Unsupported git command: ${arg}`);
       }
 
+      // Allow known safe options
+      if (safeOptions.includes(arg)) {
+        return arg;
+      }
+
+      // Allow SHA hashes (for baseRef/headRef)
+      if (shaPattern.test(arg)) {
+        return arg;
+      }
+
+      // Reject dangerous git options that could execute commands
+      if (arg.includes('--upload-pack') || arg.includes('--receive-pack') || arg.includes('--exec')) {
+        throw new Error(`Dangerous git option detected: ${arg}`);
+      }
+
+      // Reject any argument that contains shell metacharacters
       if (/[;&|`$()]/.test(arg)) {
-        throw new Error(`Rejected argument with shell metacharacters: ${arg}`);
+        throw new Error(`Argument contains shell metacharacters: ${arg}`);
+      }
+
+      // Reject any other options that start with dash (not in whitelist)
+      if (arg.startsWith('-')) {
+        throw new Error(`Potentially dangerous git option: ${arg}`);
       }
 
       return arg; // Return the clean argument
