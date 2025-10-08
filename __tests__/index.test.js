@@ -72,6 +72,11 @@ describe('npm Version Check Action - Helper Functions', () => {
       expect(() => sanitizeSHA('1234567890abcdef', 'testRef')).not.toThrow();
       expect(() => sanitizeSHA('a'.repeat(40), 'testRef')).not.toThrow();
       expect(sanitizeSHA('  abc123d  ', 'testRef')).toBe('abc123d'); // Trims whitespace
+
+      // Should normalize uppercase to lowercase
+      expect(sanitizeSHA('ABC123D', 'testRef')).toBe('abc123d');
+      expect(sanitizeSHA('1234567890ABCDEF', 'testRef')).toBe('1234567890abcdef');
+      expect(sanitizeSHA('  ABC123D  ', 'testRef')).toBe('abc123d'); // Trims and normalizes
     });
 
     test('should reject invalid SHA formats', () => {
@@ -438,6 +443,14 @@ describe('npm Version Check Action - Integration Tests', () => {
       await expect(execGit(['diff', null])).rejects.toThrow('All git arguments must be strings');
       await expect(execGit(['diff', 123])).rejects.toThrow('All git arguments must be strings');
       await expect(execGit(['diff', {}])).rejects.toThrow('All git arguments must be strings');
+    });
+
+    test('should reject empty arguments array', async () => {
+      const { execGit } = indexModule;
+
+      await expect(execGit([])).rejects.toThrow('Git command arguments cannot be empty');
+      await expect(execGit(null)).rejects.toThrow('Git command arguments cannot be empty');
+      await expect(execGit(undefined)).rejects.toThrow('Git command arguments cannot be empty');
     });
 
     test('should allow safe git commands and arguments', async () => {

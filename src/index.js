@@ -7,7 +7,7 @@ import semver from 'semver';
 // Shared constants for validation
 const SAFE_GIT_COMMANDS = ['diff', 'fetch', 'tag'];
 const SAFE_GIT_OPTIONS = ['-l', '--name-only', '--tags'];
-const SHA_PATTERN = /^[a-f0-9]{7,40}$/i;
+const SHA_PATTERN = /^[a-f0-9]{7,40}$/;
 // Pattern to detect shell metacharacters and other dangerous characters for command injection prevention
 const SHELL_INJECTION_CHARS = /[;&|`$()'"<>]/;
 
@@ -77,6 +77,11 @@ export async function execGit(args) {
 
   try {
     // Comprehensive validation and sanitization for GHAS compliance
+    // Ensure args array is not empty before processing
+    if (!args || args.length === 0) {
+      throw new Error('Git command arguments cannot be empty');
+    }
+
     // This ensures GHAS sees explicit validation before exec
     const sanitizedArgs = args.map((arg, index) => {
       if (typeof arg !== 'string') {
@@ -155,8 +160,8 @@ export function sanitizeSHA(sha, refName) {
     throw new Error(`Invalid ${refName}: must be a non-empty string`);
   }
 
-  // Remove any whitespace
-  const cleanSha = sha.trim();
+  // Remove any whitespace and normalize to lowercase for consistent validation
+  const cleanSha = sha.trim().toLowerCase();
 
   // Validate SHA format (7-40 hex characters) using shared pattern
   if (!SHA_PATTERN.test(cleanSha)) {
