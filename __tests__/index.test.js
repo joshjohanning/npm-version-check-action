@@ -171,9 +171,9 @@ describe('npm Version Check Action - Helper Functions', () => {
       const startTime = Date.now();
 
       // These inputs should not cause exponential backtracking
-      expect(isRelevantFile('package' + 'a'.repeat(100) + '.txt')).toBe(false);
-      expect(isRelevantFile('package' + 'a'.repeat(100) + '.json')).toBe(false); // Not valid package file
-      expect(isRelevantFile('a'.repeat(100) + 'package.json')).toBe(false); // Not a valid path
+      expect(isRelevantFile(`package${'a'.repeat(100)}.txt`)).toBe(false);
+      expect(isRelevantFile(`package${'a'.repeat(100)}.json`)).toBe(false); // Not valid package file
+      expect(isRelevantFile(`${'a'.repeat(100)}package.json`)).toBe(false); // Not a valid path
 
       const endTime = Date.now();
 
