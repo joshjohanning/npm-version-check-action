@@ -148,6 +148,27 @@ describe('npm Version Check Action - Helper Functions', () => {
       const { isRelevantFile } = indexModule;
       expect(isRelevantFile('package.json')).toBe(true);
       expect(isRelevantFile('packages/core/package.json')).toBe(true);
+      expect(isRelevantFile('package-lock.json')).toBe(true);
+      expect(isRelevantFile('packages/utils/package-lock.json')).toBe(true);
+      expect(isRelevantFile('my-package.json')).toBe(false); // Should not match
+      expect(isRelevantFile('packagejson')).toBe(false); // Should not match
+    });
+
+    test('should handle package.json pattern without ReDoS vulnerability', () => {
+      const { isRelevantFile } = indexModule;
+      
+      // Test potentially problematic inputs that could cause ReDoS with the old pattern
+      const startTime = Date.now();
+      
+      // These inputs should not cause exponential backtracking
+      expect(isRelevantFile('package' + 'a'.repeat(100) + '.txt')).toBe(false);
+      expect(isRelevantFile('package' + 'a'.repeat(100) + '.json')).toBe(false); // Not valid package file
+      expect(isRelevantFile('a'.repeat(100) + 'package.json')).toBe(false); // Not a valid path
+      
+      const endTime = Date.now();
+      
+      // Should complete quickly (under 100ms) - ReDoS would take much longer
+      expect(endTime - startTime).toBeLessThan(100);
     });
 
     test('should exclude test files', () => {

@@ -146,7 +146,8 @@ export function createDirectoryPatterns(directories) {
  */
 export function isRelevantFile(file) {
   const relevantExtensions = /\.(js|ts|jsx|tsx|json)$/;
-  const packageFiles = /package.*\.json$/;
+  // More specific pattern to avoid ReDoS - matches package.json, package-lock.json, etc.
+  const packageFiles = /^(?:.*\/)?package(?:-[a-z0-9-]+)?\.json$/;
 
   // Must have relevant extension
   if (!relevantExtensions.test(file)) {
