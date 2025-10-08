@@ -78,6 +78,13 @@ export async function getChangedFiles() {
 }
 
 /**
+ * Helper function to create directory exclusion patterns
+ */
+export function createDirectoryPatterns(directories) {
+  return directories.map(dir => new RegExp(`(^|\\/)${dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\/`));
+}
+
+/**
  * Check if a single file is relevant for version checking (excluding test files)
  */
 export function isRelevantFile(file) {
@@ -98,15 +105,10 @@ export function isRelevantFile(file) {
     /(^|\/)test\./, // files starting with test. (root or in any directory)
     /(^|\/)spec\./, // files starting with spec. (root or in any directory)
     /\.config\./, // config files (.eslintrc.js, jest.config.js, etc.)
-    /(^|\/)\.github\//, // GitHub workflow files
-    /(^|\/)docs?\//, // doc/ or docs/ directories
-    /(^|\/)examples?\//, // example/ or examples/ directories
-    /(^|\/)scripts?\//, // script/ or scripts/ directories
-    /(^|\/)\.vscode\//, // VS Code settings
-    /(^|\/)coverage\//, // coverage reports
-    /(^|\/)dist\//, // build output
-    /(^|\/)build\//, // build output
-    /(^|\/)node_modules\// // dependencies
+    ...createDirectoryPatterns([
+      '\\.github', 'docs?', 'examples?', 'scripts?', '\\.vscode', 
+      'coverage', 'dist', 'build', 'node_modules'
+    ])
   ];
 
   // Exclude test files and other non-production files
