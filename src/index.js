@@ -91,22 +91,22 @@ function isRelevantFile(file) {
 
   // Patterns for test files and directories to exclude
   const testPatterns = [
-    /\/tests?\//, // test/ or tests/ directories
-    /\/__tests__\//, // __tests__ directories (Jest convention)
+    /(^|\/)tests?\//, // test/ or tests/ directories
+    /(^|\/)__tests__\//, // __tests__ directories (Jest convention)
     /\.test\./, // .test.js, .test.ts, etc.
     /\.spec\./, // .spec.js, .spec.ts, etc.
     /(^|\/)test\./, // files starting with test. (root or in any directory)
     /(^|\/)spec\./, // files starting with spec. (root or in any directory)
     /\.config\./, // config files (.eslintrc.js, jest.config.js, etc.)
-    /\/\.github\//, // GitHub workflow files
-    /\/docs?\//, // doc/ or docs/ directories
-    /\/examples?\//, // example/ or examples/ directories
-    /\/scripts?\//, // script/ or scripts/ directories
-    /\/\.vscode\//, // VS Code settings
-    /\/coverage\//, // coverage reports
-    /\/dist\//, // build output
-    /\/build\//, // build output
-    /\/node_modules\// // dependencies
+    /(^|\/)\.github\//, // GitHub workflow files
+    /(^|\/)docs?\//, // doc/ or docs/ directories
+    /(^|\/)examples?\//, // example/ or examples/ directories
+    /(^|\/)scripts?\//, // script/ or scripts/ directories
+    /(^|\/)\.vscode\//, // VS Code settings
+    /(^|\/)coverage\//, // coverage reports
+    /(^|\/)dist\//, // build output
+    /(^|\/)build\//, // build output
+    /(^|\/)node_modules\// // dependencies
   ];
 
   // Exclude test files and other non-production files
