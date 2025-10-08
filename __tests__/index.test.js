@@ -68,7 +68,7 @@ describe('npm Version Check Action - Helper Functions', () => {
   describe('sanitizeSHA', () => {
     test('should accept valid SHA values', () => {
       const { sanitizeSHA } = indexModule;
-      
+
       expect(() => sanitizeSHA('abc123d', 'testRef')).not.toThrow();
       expect(() => sanitizeSHA('1234567890abcdef', 'testRef')).not.toThrow();
       expect(() => sanitizeSHA('a'.repeat(40), 'testRef')).not.toThrow();
@@ -77,7 +77,7 @@ describe('npm Version Check Action - Helper Functions', () => {
 
     test('should reject invalid SHA formats', () => {
       const { sanitizeSHA } = indexModule;
-      
+
       expect(() => sanitizeSHA('invalid', 'testRef')).toThrow('Invalid testRef format');
       expect(() => sanitizeSHA('abc123!', 'testRef')).toThrow('Invalid testRef format');
       expect(() => sanitizeSHA('123', 'testRef')).toThrow('Invalid testRef format'); // Too short
@@ -86,7 +86,7 @@ describe('npm Version Check Action - Helper Functions', () => {
 
     test('should reject dangerous characters', () => {
       const { sanitizeSHA } = indexModule;
-      
+
       // These inputs contain dangerous characters and will be caught by SHA format validation first
       expect(() => sanitizeSHA('abc123; rm -rf /', 'testRef')).toThrow('Invalid testRef format');
       expect(() => sanitizeSHA('abc123 && echo evil', 'testRef')).toThrow('Invalid testRef format');
@@ -94,14 +94,14 @@ describe('npm Version Check Action - Helper Functions', () => {
       expect(() => sanitizeSHA('abc123`whoami`', 'testRef')).toThrow('Invalid testRef format');
       expect(() => sanitizeSHA('abc123$(id)', 'testRef')).toThrow('Invalid testRef format');
       expect(() => sanitizeSHA('abc123"evil"', 'testRef')).toThrow('Invalid testRef format');
-      expect(() => sanitizeSHA("abc123'evil'", 'testRef')).toThrow('Invalid testRef format');
+      expect(() => sanitizeSHA(`abc123'evil'`, 'testRef')).toThrow('Invalid testRef format');
       expect(() => sanitizeSHA('abc123<evil', 'testRef')).toThrow('Invalid testRef format');
       expect(() => sanitizeSHA('abc123>evil', 'testRef')).toThrow('Invalid testRef format');
     });
 
     test('should reject null, undefined, or non-string values', () => {
       const { sanitizeSHA } = indexModule;
-      
+
       expect(() => sanitizeSHA(null, 'testRef')).toThrow('Invalid testRef: must be a non-empty string');
       expect(() => sanitizeSHA(undefined, 'testRef')).toThrow('Invalid testRef: must be a non-empty string');
       expect(() => sanitizeSHA('', 'testRef')).toThrow('Invalid testRef: must be a non-empty string');
@@ -494,7 +494,7 @@ describe('npm Version Check Action - Integration Tests', () => {
   describe('getChangedFiles function', () => {
     test('should return changed files for pull request', async () => {
       const { getChangedFiles } = indexModule;
-      
+
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (options.listeners && options.listeners.stdout) {
           options.listeners.stdout('src/index.js\npackage.json\nREADME.md\n');
@@ -523,7 +523,7 @@ describe('npm Version Check Action - Integration Tests', () => {
 
     test('should sanitize SHA values and reject malicious input', async () => {
       const { getChangedFiles } = indexModule;
-      
+
       // Test with malicious baseRef - will be caught by SHA format validation
       mockGithub.context.payload.pull_request.base.sha = 'abc123; rm -rf /';
       await expect(getChangedFiles()).rejects.toThrow('Invalid baseRef format');
@@ -536,7 +536,8 @@ describe('npm Version Check Action - Integration Tests', () => {
       mockGithub.context.payload.pull_request.base.sha = 'def4567';
       mockGithub.context.sha = 'abc1234';
     });
-  });  describe('getLatestVersionTag function', () => {
+  });
+  describe('getLatestVersionTag function', () => {
     test('should return latest version tag', async () => {
       const { getLatestVersionTag } = indexModule;
 
