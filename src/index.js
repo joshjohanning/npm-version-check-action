@@ -238,7 +238,11 @@ export function hasRelevantFileChanges(changedFiles) {
 }
 
 /**
- * Read and parse package.json
+ * Reads and parses a package.json file from the specified path.
+ *
+ * @param {string} packagePath - The file system path to the package.json file.
+ * @returns {Object} The parsed contents of the package.json file as a JavaScript object.
+ * @throws {Error} If the file does not exist, contains invalid JSON, or lacks a version field.
  */
 export function readPackageJson(packagePath) {
   try {
@@ -263,7 +267,11 @@ export function readPackageJson(packagePath) {
 }
 
 /**
- * Get the latest version tag from git
+ * Retrieves the latest version tag from git that matches the specified prefix.
+ *
+ * @param {string} tagPrefix - The prefix to filter version tags (e.g., 'v' for tags like 'v1.2.3').
+ * @returns {Promise<string|null>} The latest version tag matching the prefix, or null if none found.
+ * @throws {Error} If fetching or parsing git tags fails.
  */
 export async function getLatestVersionTag(tagPrefix) {
   try {
@@ -311,7 +319,13 @@ export function compareVersions(current, previous) {
 }
 
 /**
- * Fetch git tags to ensure they're available in shallow clones
+ * Fetch git tags to ensure they're available in shallow clones.
+ *
+ * Runs 'git fetch --tags' to retrieve all tags from the remote repository.
+ * Logs the process and handles errors by issuing a warning instead of throwing.
+ *
+ * @returns {Promise<void>} Resolves when tags have been fetched or a warning has been logged.
+ * @throws Does not throw; logs a warning if fetching tags fails.
  */
 export async function fetchTags() {
   try {
@@ -326,6 +340,13 @@ export async function fetchTags() {
 
 /**
  * Main action logic
+ */
+/**
+ * Main entry point for the GitHub Action.
+ *
+ * This function orchestrates the version check workflow for npm packages in pull request events.
+ * It validates the package version, compares it with existing git tags, and ensures versioning best practices.
+ * Designed to be invoked automatically by GitHub Actions.
  */
 export async function run() {
   try {
