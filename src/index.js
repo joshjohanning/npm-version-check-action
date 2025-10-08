@@ -184,7 +184,7 @@ export function isRelevantFile(file) {
     file.includes('.config.') ||
     // Documentation directories
     file.includes('/doc/') ||
-    (file.startsWith('doc/') && !file.startsWith('docs')) ||
+    file.startsWith('doc/') ||
     file === 'doc' ||
     file.includes('/docs/') ||
     file.startsWith('docs/') ||
