@@ -81,7 +81,9 @@ export async function getChangedFiles() {
  * Helper function to create directory exclusion patterns
  */
 export function createDirectoryPatterns(directories) {
-  return directories.map(dir => new RegExp(`(^|\\/)${dir.replace(/[.\\*+?^${}()|[\]]/g, '\\$&')}\\/`));
+  // Standard regex escaping function
+  const escapeRegExp = str => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return directories.map(dir => new RegExp(`(^|\\/)${escapeRegExp(dir)}\\/`));
 }
 
 /**
