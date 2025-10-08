@@ -29,7 +29,7 @@ export function logMessage(message, level = 'info') {
 /**
  * Validate git arguments to prevent command injection
  */
-function validateGitArgs(args) {
+export function validateGitArgs(args) {
   const dangerousPatterns = [
     /--upload-pack/i,
     /--receive-pack/i,

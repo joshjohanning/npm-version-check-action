@@ -65,6 +65,49 @@ describe('npm Version Check Action - Helper Functions', () => {
     jest.clearAllMocks();
   });
 
+  describe('validateGitArgs', () => {
+    test('should allow safe git commands and arguments', () => {
+      const { validateGitArgs } = indexModule;
+      
+      expect(() => validateGitArgs(['diff', '--name-only', 'abc123', 'def456'])).not.toThrow();
+      expect(() => validateGitArgs(['fetch', '--tags'])).not.toThrow();
+      expect(() => validateGitArgs(['tag', '-l'])).not.toThrow();
+    });
+
+    test('should reject dangerous arguments', () => {
+      const { validateGitArgs } = indexModule;
+      
+      expect(() => validateGitArgs(['diff', '--upload-pack=/bin/sh'])).toThrow('Potentially dangerous git argument detected');
+      expect(() => validateGitArgs(['fetch', '--receive-pack=/bin/sh'])).toThrow('Potentially dangerous git argument detected');
+      expect(() => validateGitArgs(['diff', '--exec=/bin/sh'])).toThrow('Potentially dangerous git argument detected');
+    });
+
+    test('should reject shell metacharacters', () => {
+      const { validateGitArgs } = indexModule;
+      
+      expect(() => validateGitArgs(['diff', 'abc123; rm -rf /'])).toThrow('Potentially dangerous git argument detected');
+      expect(() => validateGitArgs(['diff', 'abc123 && echo evil'])).toThrow('Potentially dangerous git argument detected');
+      expect(() => validateGitArgs(['diff', 'abc123 | cat /etc/passwd'])).toThrow('Potentially dangerous git argument detected');
+      expect(() => validateGitArgs(['diff', 'abc123`whoami`'])).toThrow('Potentially dangerous git argument detected');
+    });
+
+    test('should reject unsupported commands', () => {
+      const { validateGitArgs } = indexModule;
+      
+      expect(() => validateGitArgs(['clone', 'https://example.com'])).toThrow('Unsupported git command: clone');
+      expect(() => validateGitArgs(['push', 'origin', 'main'])).toThrow('Unsupported git command: push');
+      expect(() => validateGitArgs(['rm', 'file.txt'])).toThrow('Unsupported git command: rm');
+    });
+
+    test('should reject non-string arguments', () => {
+      const { validateGitArgs } = indexModule;
+      
+      expect(() => validateGitArgs(['diff', null])).toThrow('Git arguments must be strings');
+      expect(() => validateGitArgs(['diff', 123])).toThrow('Git arguments must be strings');
+      expect(() => validateGitArgs(['diff', {}])).toThrow('Git arguments must be strings');
+    });
+  });
+
   describe('createDirectoryPatterns', () => {
     test('should create patterns for multiple directories', () => {
       const { createDirectoryPatterns } = indexModule;
