@@ -198,7 +198,7 @@ export function isRelevantFile(file) {
     file === 'examples' ||
     // Script directories (not files like scripts.js)
     file.includes('/script/') ||
-    (file.startsWith('script/') && !file.startsWith('scripts')) ||
+    file.startsWith('script/') ||
     file === 'script' ||
     file.includes('/scripts/') ||
     file.startsWith('scripts/') ||
