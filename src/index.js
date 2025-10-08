@@ -8,8 +8,8 @@ import semver from 'semver';
 const SAFE_GIT_COMMANDS = ['diff', 'fetch', 'tag'];
 const SAFE_GIT_OPTIONS = ['-l', '--name-only', '--tags'];
 const SHA_PATTERN = /^[a-f0-9]{7,40}$/i;
-const DANGEROUS_CHARS = /[;&|`$()'"<>]/;
-const SHELL_METACHARACTERS = /[;&|`$()]/;
+// Pattern to detect shell metacharacters and other dangerous characters for command injection prevention
+const SHELL_INJECTION_CHARS = /[;&|`$()'"<>]/;
 
 /**
  * Log a message using GitHub Actions core logging
@@ -81,7 +81,7 @@ export async function execGit(args) {
       }
 
       // Reject any argument that contains shell metacharacters
-      if (SHELL_METACHARACTERS.test(arg)) {
+      if (SHELL_INJECTION_CHARS.test(arg)) {
         throw new Error(`Argument contains shell metacharacters: ${arg}`);
       }
 
@@ -117,6 +117,11 @@ export function sanitizeSHA(sha, refName) {
   // Validate SHA format (7-40 hex characters) using shared pattern
   if (!SHA_PATTERN.test(cleanSha)) {
     throw new Error(`Invalid ${refName} format: ${cleanSha}. Must be a valid git SHA (7-40 hex characters)`);
+  }
+
+  // Additional safety: ensure no shell metacharacters using shared pattern
+  if (SHELL_INJECTION_CHARS.test(cleanSha)) {
+    throw new Error(`Invalid ${refName}: contains dangerous characters`);
   }
 
   return cleanSha;
