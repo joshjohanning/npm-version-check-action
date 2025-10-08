@@ -2,6 +2,7 @@ import * as core from '@actions/core';
 import * as exec from '@actions/exec';
 import * as github from '@actions/github';
 import * as fs from 'fs';
+import * as path from 'path';
 import semver from 'semver';
 
 // Shared constants for validation
@@ -33,6 +34,7 @@ const EXCLUDED_DIRECTORIES = [
 ];
 const EXCLUDED_FILE_PATTERNS = ['.test.', '.spec.', '.config.'];
 const EXCLUDED_FILE_START_PATTERNS = ['test.', 'spec.'];
+const PACKAGE_FILENAMES = ['package.json', 'package-lock.json'];
 
 /**
  * Log a message using GitHub Actions core logging
@@ -205,8 +207,11 @@ export async function getChangedFiles() {
  * Check if a single file is relevant for version checking (excluding test files)
  */
 export function isRelevantFile(file) {
+  // Extract file extension once for performance
+  const fileExtension = path.extname(file);
+
   // Must have relevant extension
-  if (!RELEVANT_EXTENSIONS.some(ext => file.endsWith(ext))) {
+  if (!RELEVANT_EXTENSIONS.includes(fileExtension)) {
     return false;
   }
 
@@ -224,7 +229,7 @@ export function isRelevantFile(file) {
 
   // Helper function to check if filename starts with a pattern
   const filenameStartsWith = pattern => {
-    const fileName = file.split('/').pop();
+    const fileName = path.basename(file);
     return fileName.startsWith(pattern);
   };
 
@@ -241,8 +246,8 @@ export function isRelevantFile(file) {
 
   // Helper function to check if file is a package file
   const isPackageFile = filePath => {
-    const fileName = filePath.split('/').pop();
-    return fileName === 'package.json' || fileName === 'package-lock.json';
+    const fileName = path.basename(filePath);
+    return PACKAGE_FILENAMES.includes(fileName);
   };
 
   // Include package.json files (package.json, package-lock.json, etc.)
@@ -251,7 +256,7 @@ export function isRelevantFile(file) {
   }
 
   // At this point, include only JavaScript/TypeScript files (package files were already handled above)
-  return JS_TS_EXTENSIONS.some(ext => file.endsWith(ext));
+  return JS_TS_EXTENSIONS.includes(fileExtension);
 }
 
 /**
