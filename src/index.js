@@ -4,6 +4,13 @@ import * as github from '@actions/github';
 import * as fs from 'fs';
 import semver from 'semver';
 
+// Shared constants for validation
+const SAFE_GIT_COMMANDS = ['diff', 'fetch', 'tag'];
+const SAFE_GIT_OPTIONS = ['-l', '--name-only', '--tags'];
+const SHA_PATTERN = /^[a-f0-9]{7,40}$/i;
+const DANGEROUS_CHARS = /[;&|`$()'"<>]/;
+const SHELL_METACHARACTERS = /[;&|`$()]/;
+
 /**
  * Log a message using GitHub Actions core logging
  */
@@ -48,27 +55,23 @@ export async function execGit(args) {
   try {
     // Comprehensive validation and sanitization for GHAS compliance
     // This ensures GHAS sees explicit validation before exec
-    const safeCommands = ['diff', 'fetch', 'tag'];
-    const safeOptions = ['-l', '--name-only', '--tags'];
-    const shaPattern = /^[a-f0-9]{7,40}$/i;
-
     const sanitizedArgs = args.map((arg, index) => {
       if (typeof arg !== 'string') {
         throw new Error('All git arguments must be strings');
       }
 
       // First argument must be a whitelisted git command
-      if (index === 0 && !safeCommands.includes(arg)) {
+      if (index === 0 && !SAFE_GIT_COMMANDS.includes(arg)) {
         throw new Error(`Unsupported git command: ${arg}`);
       }
 
       // Allow known safe options
-      if (safeOptions.includes(arg)) {
+      if (SAFE_GIT_OPTIONS.includes(arg)) {
         return arg;
       }
 
-      // Allow SHA hashes (for baseRef/headRef)
-      if (shaPattern.test(arg)) {
+      // Allow SHA hashes (for baseRef/headRef) - inline validation for GHAS
+      if (SHA_PATTERN.test(arg)) {
         return arg;
       }
 
@@ -78,7 +81,7 @@ export async function execGit(args) {
       }
 
       // Reject any argument that contains shell metacharacters
-      if (/[;&|`$()]/.test(arg)) {
+      if (SHELL_METACHARACTERS.test(arg)) {
         throw new Error(`Argument contains shell metacharacters: ${arg}`);
       }
 
@@ -111,15 +114,13 @@ export function sanitizeSHA(sha, refName) {
   // Remove any whitespace
   const cleanSha = sha.trim();
 
-  // Validate SHA format (7-40 hex characters)
-  const shaPattern = /^[a-f0-9]{7,40}$/i;
-  if (!shaPattern.test(cleanSha)) {
+  // Validate SHA format (7-40 hex characters) using shared pattern
+  if (!SHA_PATTERN.test(cleanSha)) {
     throw new Error(`Invalid ${refName} format: ${cleanSha}. Must be a valid git SHA (7-40 hex characters)`);
   }
 
-  // Additional safety: ensure no shell metacharacters
-  const dangerousChars = /[;&|`$()'"<>]/;
-  if (dangerousChars.test(cleanSha)) {
+  // Additional safety: ensure no shell metacharacters using shared pattern
+  if (DANGEROUS_CHARS.test(cleanSha)) {
     throw new Error(`Invalid ${refName}: contains dangerous characters`);
   }
 
