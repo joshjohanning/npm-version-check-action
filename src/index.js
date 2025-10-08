@@ -8,6 +8,7 @@ import semver from 'semver';
 // Shared constants for validation
 const SAFE_GIT_COMMANDS = ['diff', 'fetch', 'tag'];
 const SAFE_GIT_OPTIONS = ['-l', '--name-only', '--tags'];
+const SHA_PATTERN = /^[a-f0-9]{7,40}$/i;
 // Pattern to detect shell metacharacters and other dangerous characters for command injection prevention
 const SHELL_INJECTION_CHARS = /[;&|`$()'"<>]/;
 
@@ -99,8 +100,8 @@ export async function execGit(args) {
         return arg;
       }
 
-      // Allow SHA hashes (for baseRef/headRef) - inline validation for GHAS with case-insensitive check
-      if (/^[a-f0-9]{7,40}$/i.test(arg)) {
+      // Allow SHA hashes (for baseRef/headRef) - inline validation for GHAS
+      if (SHA_PATTERN.test(arg)) {
         return arg;
       }
 
@@ -164,8 +165,8 @@ export function sanitizeSHA(sha, refName) {
   // Remove any whitespace but preserve original case
   const cleanSha = sha.trim();
 
-  // Validate SHA format (7-40 hex characters) using case-insensitive validation
-  if (!/^[a-f0-9]{7,40}$/i.test(cleanSha)) {
+  // Validate SHA format (7-40 hex characters) using shared pattern
+  if (!SHA_PATTERN.test(cleanSha)) {
     throw new Error(`Invalid ${refName} format: ${cleanSha}. Must be a valid git SHA (7-40 hex characters)`);
   }
 
