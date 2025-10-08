@@ -5,8 +5,7 @@
 import { jest } from '@jest/globals';
 
 // Mock process.exit to prevent tests from exiting
-// eslint-disable-next-line no-unused-vars
-const mockExit = jest.spyOn(process, 'exit').mockImplementation(() => {});
+jest.spyOn(process, 'exit').mockImplementation(() => {});
 
 // Mock @actions/core before importing index.js
 const mockCore = {
