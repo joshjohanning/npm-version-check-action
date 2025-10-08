@@ -30,11 +30,11 @@ const mockExec = {
 const mockGithub = {
   context: {
     eventName: 'pull_request',
-    sha: 'abc123',
+    sha: 'abc1234',
     payload: {
       pull_request: {
         base: {
-          sha: 'def456'
+          sha: 'def4567'
         }
       }
     }
@@ -65,11 +65,55 @@ describe('npm Version Check Action - Helper Functions', () => {
     jest.clearAllMocks();
   });
 
+  describe('sanitizeSHA', () => {
+    test('should accept valid SHA values', () => {
+      const { sanitizeSHA } = indexModule;
+      
+      expect(() => sanitizeSHA('abc123d', 'testRef')).not.toThrow();
+      expect(() => sanitizeSHA('1234567890abcdef', 'testRef')).not.toThrow();
+      expect(() => sanitizeSHA('a'.repeat(40), 'testRef')).not.toThrow();
+      expect(sanitizeSHA('  abc123d  ', 'testRef')).toBe('abc123d'); // Trims whitespace
+    });
+
+    test('should reject invalid SHA formats', () => {
+      const { sanitizeSHA } = indexModule;
+      
+      expect(() => sanitizeSHA('invalid', 'testRef')).toThrow('Invalid testRef format');
+      expect(() => sanitizeSHA('abc123!', 'testRef')).toThrow('Invalid testRef format');
+      expect(() => sanitizeSHA('123', 'testRef')).toThrow('Invalid testRef format'); // Too short
+      expect(() => sanitizeSHA('a'.repeat(41), 'testRef')).toThrow('Invalid testRef format'); // Too long
+    });
+
+    test('should reject dangerous characters', () => {
+      const { sanitizeSHA } = indexModule;
+      
+      // These inputs contain dangerous characters and will be caught by SHA format validation first
+      expect(() => sanitizeSHA('abc123; rm -rf /', 'testRef')).toThrow('Invalid testRef format');
+      expect(() => sanitizeSHA('abc123 && echo evil', 'testRef')).toThrow('Invalid testRef format');
+      expect(() => sanitizeSHA('abc123|cat /etc/passwd', 'testRef')).toThrow('Invalid testRef format');
+      expect(() => sanitizeSHA('abc123`whoami`', 'testRef')).toThrow('Invalid testRef format');
+      expect(() => sanitizeSHA('abc123$(id)', 'testRef')).toThrow('Invalid testRef format');
+      expect(() => sanitizeSHA('abc123"evil"', 'testRef')).toThrow('Invalid testRef format');
+      expect(() => sanitizeSHA("abc123'evil'", 'testRef')).toThrow('Invalid testRef format');
+      expect(() => sanitizeSHA('abc123<evil', 'testRef')).toThrow('Invalid testRef format');
+      expect(() => sanitizeSHA('abc123>evil', 'testRef')).toThrow('Invalid testRef format');
+    });
+
+    test('should reject null, undefined, or non-string values', () => {
+      const { sanitizeSHA } = indexModule;
+      
+      expect(() => sanitizeSHA(null, 'testRef')).toThrow('Invalid testRef: must be a non-empty string');
+      expect(() => sanitizeSHA(undefined, 'testRef')).toThrow('Invalid testRef: must be a non-empty string');
+      expect(() => sanitizeSHA('', 'testRef')).toThrow('Invalid testRef: must be a non-empty string');
+      expect(() => sanitizeSHA(123, 'testRef')).toThrow('Invalid testRef: must be a non-empty string');
+    });
+  });
+
   describe('validateGitArgs', () => {
     test('should allow safe git commands and arguments', () => {
       const { validateGitArgs } = indexModule;
 
-      expect(() => validateGitArgs(['diff', '--name-only', 'abc123', 'def456'])).not.toThrow();
+      expect(() => validateGitArgs(['diff', '--name-only', 'abc1234', 'def4567'])).not.toThrow();
       expect(() => validateGitArgs(['fetch', '--tags'])).not.toThrow();
       expect(() => validateGitArgs(['tag', '-l'])).not.toThrow();
     });
@@ -362,10 +406,10 @@ describe('npm Version Check Action - Integration Tests', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockGithub.context.eventName = 'pull_request';
-    mockGithub.context.sha = 'abc123';
+    mockGithub.context.sha = 'abc1234';
     mockGithub.context.payload = {
       pull_request: {
-        base: { sha: 'def456' }
+        base: { sha: 'def4567' }
       }
     };
   });
@@ -383,11 +427,11 @@ describe('npm Version Check Action - Integration Tests', () => {
         return 0;
       });
 
-      const result = await execGit(['diff', '--name-only', 'abc123', 'def456']);
+      const result = await execGit(['diff', '--name-only', 'abc1234', 'def4567']);
       expect(result).toBe('git output');
       expect(mockExec.exec).toHaveBeenCalledWith(
         'git',
-        ['diff', '--name-only', 'abc123', 'def456'],
+        ['diff', '--name-only', 'abc1234', 'def4567'],
         expect.objectContaining({
           listeners: expect.any(Object),
           silent: true
@@ -405,7 +449,7 @@ describe('npm Version Check Action - Integration Tests', () => {
         throw new Error('Command failed');
       });
 
-      await expect(execGit(['diff', '--name-only', 'abc123', 'def456'])).rejects.toThrow(
+      await expect(execGit(['diff', '--name-only', 'abc1234', 'def4567'])).rejects.toThrow(
         'Git command failed: git error message'
       );
     });
@@ -450,7 +494,7 @@ describe('npm Version Check Action - Integration Tests', () => {
   describe('getChangedFiles function', () => {
     test('should return changed files for pull request', async () => {
       const { getChangedFiles } = indexModule;
-
+      
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (options.listeners && options.listeners.stdout) {
           options.listeners.stdout('src/index.js\npackage.json\nREADME.md\n');
@@ -476,9 +520,23 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       await expect(getChangedFiles()).rejects.toThrow('Could not determine base and head refs for PR');
     });
-  });
 
-  describe('getLatestVersionTag function', () => {
+    test('should sanitize SHA values and reject malicious input', async () => {
+      const { getChangedFiles } = indexModule;
+      
+      // Test with malicious baseRef - will be caught by SHA format validation
+      mockGithub.context.payload.pull_request.base.sha = 'abc123; rm -rf /';
+      await expect(getChangedFiles()).rejects.toThrow('Invalid baseRef format');
+
+      // Test with invalid SHA format
+      mockGithub.context.payload.pull_request.base.sha = 'invalid-sha';
+      await expect(getChangedFiles()).rejects.toThrow('Invalid baseRef format');
+
+      // Reset to valid values
+      mockGithub.context.payload.pull_request.base.sha = 'def4567';
+      mockGithub.context.sha = 'abc1234';
+    });
+  });  describe('getLatestVersionTag function', () => {
     test('should return latest version tag', async () => {
       const { getLatestVersionTag } = indexModule;
 

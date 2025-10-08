@@ -112,6 +112,32 @@ export async function execGit(args) {
 }
 
 /**
+ * Sanitize and validate SHA values to prevent command injection
+ */
+export function sanitizeSHA(sha, refName) {
+  if (!sha || typeof sha !== 'string') {
+    throw new Error(`Invalid ${refName}: must be a non-empty string`);
+  }
+
+  // Remove any whitespace
+  const cleanSha = sha.trim();
+
+  // Validate SHA format (7-40 hex characters)
+  const shaPattern = /^[a-f0-9]{7,40}$/i;
+  if (!shaPattern.test(cleanSha)) {
+    throw new Error(`Invalid ${refName} format: ${cleanSha}. Must be a valid git SHA (7-40 hex characters)`);
+  }
+
+  // Additional safety: ensure no shell metacharacters
+  const dangerousChars = /[;&|`$()'"<>]/;
+  if (dangerousChars.test(cleanSha)) {
+    throw new Error(`Invalid ${refName}: contains dangerous characters`);
+  }
+
+  return cleanSha;
+}
+
+/**
  * Get files changed in the current PR
  */
 export async function getChangedFiles() {
@@ -128,7 +154,11 @@ export async function getChangedFiles() {
     throw new Error('Could not determine base and head refs for PR');
   }
 
-  const output = await execGit(['diff', '--name-only', baseRef, headRef]);
+  // Sanitize SHA values to prevent command injection
+  const sanitizedBaseRef = sanitizeSHA(baseRef, 'baseRef');
+  const sanitizedHeadRef = sanitizeSHA(headRef, 'headRef');
+
+  const output = await execGit(['diff', '--name-only', sanitizedBaseRef, sanitizedHeadRef]);
   return output ? output.split('\n') : [];
 }
 
