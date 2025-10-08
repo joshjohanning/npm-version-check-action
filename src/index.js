@@ -34,7 +34,7 @@ export function validateGitArgs(args) {
     /--upload-pack/i,
     /--receive-pack/i,
     /--exec/i,
-    /[;&|`$()]/,  // Shell metacharacters
+    /[;&|`$()]/ // Shell metacharacters
   ];
 
   // Known safe git commands and options
@@ -44,21 +44,21 @@ export function validateGitArgs(args) {
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    
+
     if (typeof arg !== 'string') {
       throw new Error('Git arguments must be strings');
     }
-    
+
     // First argument should be a git command
     if (i === 0 && !safeCommands.includes(arg)) {
       throw new Error(`Unsupported git command: ${arg}`);
     }
-    
+
     // Skip validation for known safe options
     if (safeOptions.includes(arg)) {
       continue;
     }
-    
+
     // Allow SHA hashes (for baseRef/headRef)
     if (shaPattern.test(arg)) {
       continue;
@@ -70,7 +70,7 @@ export function validateGitArgs(args) {
         throw new Error(`Potentially dangerous git argument detected: ${arg}`);
       }
     }
-    
+
     // Reject arguments that start with dash (except known safe options)
     if (arg.startsWith('-') && !safeOptions.includes(arg)) {
       throw new Error(`Potentially dangerous git option: ${arg}`);
@@ -164,8 +164,15 @@ export function isRelevantFile(file) {
     /(^|\/)spec\./, // files starting with spec. (root or in any directory)
     /\.config\./, // config files (.eslintrc.js, jest.config.js, etc.)
     ...createDirectoryPatterns([
-      '.github', 'docs?', 'examples?', 'scripts?', '.vscode', 
-      'coverage', 'dist', 'build', 'node_modules'
+      '.github',
+      'docs?',
+      'examples?',
+      'scripts?',
+      '.vscode',
+      'coverage',
+      'dist',
+      'build',
+      'node_modules'
     ])
   ];
 
