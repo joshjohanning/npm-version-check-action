@@ -165,13 +165,9 @@ export function isRelevantFile(file) {
 
   // Helper function to check if file matches a directory pattern
   const matchesDirectory = dirName => {
-    // Check if file is in a directory with exact name match
-    if (file.includes(`/${dirName}/`)) return true;
-    // Check if file is at root level in directory (exact directory name followed by slash)
-    if (file.startsWith(`${dirName}/`)) return true;
-    // Check if file is exactly the directory name (for directory-only entries)
-    if (file === dirName) return true;
-    return false;
+    // Split the file path into segments and check for exact directory name match
+    const segments = file.split('/');
+    return segments.includes(dirName);
   };
 
   // Helper function to check if file matches a file pattern
