@@ -158,66 +158,41 @@ export function isRelevantFile(file) {
     return false;
   }
 
-  // Use string methods with proper boundary checks for accurate matching
+  // Helper function to check if file matches a directory pattern
+  const matchesDirectory = dirName =>
+    file.includes(`/${dirName}/`) || file.startsWith(`${dirName}/`) || file === dirName;
+
+  // Helper function to check if file matches a file pattern
+  const matchesFilePattern = pattern => file.includes(pattern);
+
+  // Define excluded directories and patterns
+  const excludedDirectories = [
+    'test',
+    'tests',
+    '__tests__',
+    'doc',
+    'docs',
+    'example',
+    'examples',
+    'script',
+    'scripts',
+    '.github',
+    '.vscode',
+    'coverage',
+    'dist',
+    'build',
+    'node_modules'
+  ];
+
+  const excludedFilePatterns = ['.test.', '.spec.', '.config.'];
+
+  const excludedFileStartPatterns = ['test.', 'spec.'];
+
+  // Check if file should be excluded
   const isTestOrNonProdFile =
-    // Test directories
-    file.includes('/test/') ||
-    file.startsWith('test/') ||
-    file === 'test' ||
-    file.includes('/tests/') ||
-    file.startsWith('tests/') ||
-    file === 'tests' ||
-    file.includes('/__tests__/') ||
-    file.startsWith('__tests__/') ||
-    file === '__tests__' ||
-    // Test files (proper boundary checks)
-    file.startsWith('test.') ||
-    file.includes('.test.') ||
-    file.startsWith('spec.') ||
-    file.includes('.spec.') ||
-    // Config files
-    file.includes('.config.') ||
-    // Documentation directories
-    file.includes('/doc/') ||
-    file.startsWith('doc/') ||
-    file === 'doc' ||
-    file.includes('/docs/') ||
-    file.startsWith('docs/') ||
-    file === 'docs' ||
-    // Example directories
-    file.includes('/example/') ||
-    file.startsWith('example/') ||
-    file === 'example' ||
-    file.includes('/examples/') ||
-    file.startsWith('examples/') ||
-    file === 'examples' ||
-    // Script directories (not files like scripts.js)
-    file.includes('/script/') ||
-    file.startsWith('script/') ||
-    file === 'script' ||
-    file.includes('/scripts/') ||
-    file.startsWith('scripts/') ||
-    file === 'scripts' ||
-    // IDE/Tool directories
-    file.includes('/.github/') ||
-    file.startsWith('.github/') ||
-    file === '.github' ||
-    file.includes('/.vscode/') ||
-    file.startsWith('.vscode/') ||
-    file === '.vscode' ||
-    // Build/Output directories
-    file.includes('/coverage/') ||
-    file.startsWith('coverage/') ||
-    file === 'coverage' ||
-    file.includes('/dist/') ||
-    file.startsWith('dist/') ||
-    file === 'dist' ||
-    file.includes('/build/') ||
-    file.startsWith('build/') ||
-    file === 'build' ||
-    file.includes('/node_modules/') ||
-    file.startsWith('node_modules/') ||
-    file === 'node_modules';
+    excludedDirectories.some(matchesDirectory) ||
+    excludedFilePatterns.some(matchesFilePattern) ||
+    excludedFileStartPatterns.some(pattern => file.startsWith(pattern));
 
   // Exclude test files and other non-production files
   if (isTestOrNonProdFile) {
