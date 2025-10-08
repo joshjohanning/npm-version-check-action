@@ -2,7 +2,9 @@
 
 [![GitHub release](https://img.shields.io/github/release/joshjohanning/npm-version-check-action.svg)](https://github.com/joshjohanning/npm-version-check-action/releases)
 [![GitHub marketplace](https://img.shields.io/badge/marketplace-npm--version--check--action-blue?logo=github)](https://github.com/marketplace/actions/npm-version-check-action)
-[![CI](https://github.com/joshjohanning/npm-version-check-action/workflows/CI/badge.svg)](https://github.com/joshjohanning/npm-version-check-action/actions)
+[![CI](https://github.com/joshjohanning/npm-version-check-action/actions/workflows/ci.yml/badge.svg)](https://github.com/joshjohanning/npm-version-check-action/actions/workflows/ci.yml)
+[![Publish GitHub Action](https://github.com/joshjohanning/npm-version-check-action/actions/workflows/publish.yml/badge.svg)](https://github.com/joshjohanning/npm-version-check-action/actions/workflows/publish.yml)
+![Coverage](./badges/coverage.svg)
 
 🔍 **GitHub Action that validates npm package version increments in pull requests to ensure proper semantic versioning**
 
