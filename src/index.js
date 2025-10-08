@@ -204,10 +204,14 @@ export function isRelevantFile(file) {
     return false;
   }
 
+  // Helper function to check if file is a package file
+  const isPackageFile = filePath => {
+    const fileName = filePath.split('/').pop();
+    return fileName === 'package.json' || fileName === 'package-lock.json';
+  };
+
   // Include package.json files (package.json, package-lock.json, etc.)
-  // Check if the filename after the last slash is exactly package.json or package-lock.json
-  const fileName = file.split('/').pop();
-  if (fileName === 'package.json' || fileName === 'package-lock.json') {
+  if (isPackageFile(file)) {
     return true;
   }
 
