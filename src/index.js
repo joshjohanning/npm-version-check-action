@@ -224,8 +224,10 @@ export function isRelevantFile(file) {
     return true;
   }
 
-  // Include JavaScript/TypeScript files that aren't excluded above
-  return file.endsWith('.js') || file.endsWith('.ts') || file.endsWith('.jsx') || file.endsWith('.tsx');
+  // Include only JavaScript/TypeScript files that aren't excluded above
+  // (exclude .json files that aren't package files)
+  const jsTypeScriptExtensions = ['.js', '.ts', '.jsx', '.tsx'];
+  return jsTypeScriptExtensions.some(ext => file.endsWith(ext));
 }
 
 /**
