@@ -196,11 +196,17 @@ export function isRelevantFile(file) {
 
   const excludedFileStartPatterns = ['test.', 'spec.'];
 
+  // Helper function to check if filename starts with a pattern
+  const filenameStartsWith = pattern => {
+    const fileName = file.split('/').pop();
+    return fileName.startsWith(pattern);
+  };
+
   // Check if file should be excluded
   const isTestOrNonProdFile =
     excludedDirectories.some(matchesDirectory) ||
     excludedFilePatterns.some(matchesFilePattern) ||
-    excludedFileStartPatterns.some(pattern => file.startsWith(pattern));
+    excludedFileStartPatterns.some(filenameStartsWith);
 
   // Exclude test files and other non-production files
   if (isTestOrNonProdFile) {
