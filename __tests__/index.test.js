@@ -73,10 +73,10 @@ describe('npm Version Check Action - Helper Functions', () => {
       expect(() => sanitizeSHA('a'.repeat(40), 'testRef')).not.toThrow();
       expect(sanitizeSHA('  abc123d  ', 'testRef')).toBe('abc123d'); // Trims whitespace
 
-      // Should normalize uppercase to lowercase
-      expect(sanitizeSHA('ABC123D', 'testRef')).toBe('abc123d');
-      expect(sanitizeSHA('1234567890ABCDEF', 'testRef')).toBe('1234567890abcdef');
-      expect(sanitizeSHA('  ABC123D  ', 'testRef')).toBe('abc123d'); // Trims and normalizes
+      // Should accept both uppercase and lowercase but preserve original case
+      expect(sanitizeSHA('ABC123D', 'testRef')).toBe('ABC123D');
+      expect(sanitizeSHA('1234567890ABCDEF', 'testRef')).toBe('1234567890ABCDEF');
+      expect(sanitizeSHA('  ABC123D  ', 'testRef')).toBe('ABC123D'); // Trims but preserves case
     });
 
     test('should reject invalid SHA formats', () => {
