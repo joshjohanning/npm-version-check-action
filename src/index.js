@@ -27,9 +27,64 @@ export function logMessage(message, level = 'info') {
 }
 
 /**
+ * Validate git arguments to prevent command injection
+ */
+function validateGitArgs(args) {
+  const dangerousPatterns = [
+    /--upload-pack/i,
+    /--receive-pack/i,
+    /--exec/i,
+    /[;&|`$()]/,  // Shell metacharacters
+  ];
+
+  // Known safe git commands and options
+  const safeCommands = ['diff', 'fetch', 'tag'];
+  const safeOptions = ['--name-only', '--tags', '-l'];
+  const shaPattern = /^[a-f0-9]{7,40}$/i; // Git SHA pattern
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    
+    if (typeof arg !== 'string') {
+      throw new Error('Git arguments must be strings');
+    }
+    
+    // First argument should be a git command
+    if (i === 0 && !safeCommands.includes(arg)) {
+      throw new Error(`Unsupported git command: ${arg}`);
+    }
+    
+    // Skip validation for known safe options
+    if (safeOptions.includes(arg)) {
+      continue;
+    }
+    
+    // Allow SHA hashes (for baseRef/headRef)
+    if (shaPattern.test(arg)) {
+      continue;
+    }
+
+    // Check for dangerous patterns
+    for (const pattern of dangerousPatterns) {
+      if (pattern.test(arg)) {
+        throw new Error(`Potentially dangerous git argument detected: ${arg}`);
+      }
+    }
+    
+    // Reject arguments that start with dash (except known safe options)
+    if (arg.startsWith('-') && !safeOptions.includes(arg)) {
+      throw new Error(`Potentially dangerous git option: ${arg}`);
+    }
+  }
+}
+
+/**
  * Execute a git command and return the output
  */
 export async function execGit(args) {
+  // Validate arguments for security
+  validateGitArgs(args);
+
   let output = '';
   let error = '';
 

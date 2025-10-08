@@ -309,11 +309,11 @@ describe('npm Version Check Action - Integration Tests', () => {
         return 0;
       });
 
-      const result = await execGit(['status']);
+      const result = await execGit(['diff', '--name-only', 'abc123', 'def456']);
       expect(result).toBe('git output');
       expect(mockExec.exec).toHaveBeenCalledWith(
         'git',
-        ['status'],
+        ['diff', '--name-only', 'abc123', 'def456'],
         expect.objectContaining({
           listeners: expect.any(Object),
           silent: true
@@ -323,7 +323,7 @@ describe('npm Version Check Action - Integration Tests', () => {
 
     test('should handle git command failures with stderr', async () => {
       const { execGit } = indexModule;
-
+      
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (options.listeners && options.listeners.stderr) {
           options.listeners.stderr('git error message');
@@ -331,11 +331,40 @@ describe('npm Version Check Action - Integration Tests', () => {
         throw new Error('Command failed');
       });
 
-      await expect(execGit(['invalid-command'])).rejects.toThrow('Git command failed: git error message');
+      await expect(execGit(['diff', '--name-only', 'abc123', 'def456'])).rejects.toThrow('Git command failed: git error message');
     });
-  });
 
-  describe('getChangedFiles function', () => {
+    test('should reject dangerous git arguments', async () => {
+      const { execGit } = indexModule;
+      
+      await expect(execGit(['diff', '--upload-pack=/bin/sh'])).rejects.toThrow('Potentially dangerous git argument detected');
+      await expect(execGit(['diff', '--exec=/bin/sh'])).rejects.toThrow('Potentially dangerous git argument detected');
+      await expect(execGit(['diff', 'abc123; rm -rf /'])).rejects.toThrow('Potentially dangerous git argument detected');
+    });
+
+    test('should reject unsupported git commands', async () => {
+      const { execGit } = indexModule;
+      
+      await expect(execGit(['clone', 'https://example.com/repo.git'])).rejects.toThrow('Unsupported git command: clone');
+      await expect(execGit(['push', 'origin', 'main'])).rejects.toThrow('Unsupported git command: push');
+    });
+
+    test('should reject dangerous options', async () => {
+      const { execGit } = indexModule;
+      
+      await expect(execGit(['diff', '--dangerous-option'])).rejects.toThrow('Potentially dangerous git option');
+      await expect(execGit(['fetch', '--upload-pack'])).rejects.toThrow('Potentially dangerous git argument detected');
+    });
+
+    test('should allow valid SHA hashes', async () => {
+      const { execGit } = indexModule;
+      mockExec.exec.mockResolvedValue(0);
+      
+      // Should not throw for valid SHA patterns
+      await expect(execGit(['diff', '--name-only', 'a1b2c3d', 'f4e5d6c7b8a9'])).resolves.not.toThrow();
+      await expect(execGit(['diff', '--name-only', 'abc123def456', '1234567890abcdef'])).resolves.not.toThrow();
+    });
+  });  describe('getChangedFiles function', () => {
     test('should return changed files for pull request', async () => {
       const { getChangedFiles } = indexModule;
 
