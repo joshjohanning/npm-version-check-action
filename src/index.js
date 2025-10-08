@@ -164,28 +164,46 @@ export function isRelevantFile(file) {
     return false;
   }
 
-  // Patterns for test files and directories to exclude
-  const testPatterns = [
-    /(^|\/)tests?\//, // test/ or tests/ directories
-    /(^|\/)__tests__\//, // __tests__ directories (Jest convention)
-    /\.test\./, // .test.js, .test.ts, etc.
-    /\.spec\./, // .spec.js, .spec.ts, etc.
-    /(^|\/)test\./, // files starting with test. (root or in any directory)
-    /(^|\/)spec\./, // files starting with spec. (root or in any directory)
-    /\.config\./, // config files (.eslintrc.js, jest.config.js, etc.)
-    /(^|\/)docs?\//, // doc/ or docs/ directories
-    /(^|\/)examples?\//, // example/ or examples/ directories
-    /(^|\/)scripts?\//, // script/ or scripts/ directories
-    /(^|\/)\.github\//, // .github/ directory
-    /(^|\/)\.vscode\//, // .vscode/ directory
-    /(^|\/)coverage\//, // coverage/ directory
-    /(^|\/)dist\//, // dist/ directory
-    /(^|\/)build\//, // build/ directory
-    /(^|\/)node_modules\// // node_modules/ directory
-  ];
+  // Use string methods for performance instead of regexes with (^|\/)
+  const isTestOrNonProdFile =
+    file.includes('/test/') ||
+    file.startsWith('test/') ||
+    file.includes('/tests/') ||
+    file.startsWith('tests/') ||
+    file.includes('/__tests__/') ||
+    file.startsWith('__tests__/') ||
+    file.startsWith('test.') ||
+    file.startsWith('spec.') ||
+    file.includes('.test.') ||
+    file.includes('.spec.') ||
+    file.includes('.config.') ||
+    file.includes('/doc/') ||
+    file.startsWith('doc/') ||
+    file.includes('/docs/') ||
+    file.startsWith('docs/') ||
+    file.includes('/example/') ||
+    file.startsWith('example/') ||
+    file.includes('/examples/') ||
+    file.startsWith('examples/') ||
+    file.includes('/script/') ||
+    file.startsWith('script/') ||
+    file.includes('/scripts/') ||
+    file.startsWith('scripts/') ||
+    file.includes('/.github/') ||
+    file.startsWith('.github/') ||
+    file.includes('/.vscode/') ||
+    file.startsWith('.vscode/') ||
+    file.includes('/coverage/') ||
+    file.startsWith('coverage/') ||
+    file.includes('/dist/') ||
+    file.startsWith('dist/') ||
+    file.includes('/build/') ||
+    file.startsWith('build/') ||
+    file.includes('/node_modules/') ||
+    file.startsWith('node_modules/');
 
   // Exclude test files and other non-production files
-  if (testPatterns.some(pattern => pattern.test(file))) {
+  if (isTestOrNonProdFile) {
     return false;
   }
 
