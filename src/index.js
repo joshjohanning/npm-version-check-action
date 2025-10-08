@@ -119,11 +119,6 @@ export function sanitizeSHA(sha, refName) {
     throw new Error(`Invalid ${refName} format: ${cleanSha}. Must be a valid git SHA (7-40 hex characters)`);
   }
 
-  // Additional safety: ensure no shell metacharacters using shared pattern
-  if (DANGEROUS_CHARS.test(cleanSha)) {
-    throw new Error(`Invalid ${refName}: contains dangerous characters`);
-  }
-
   return cleanSha;
 }
 
