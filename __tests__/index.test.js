@@ -178,6 +178,24 @@ describe('npm Version Check Action - Helper Functions', () => {
       expect(isRelevantFile('node_modules/package/index.js')).toBe(false);
     });
 
+    test('should handle edge cases with improved boundary checks', () => {
+      const { isRelevantFile } = indexModule;
+
+      // These should NOT be excluded (they are legitimate files)
+      expect(isRelevantFile('scripts.js')).toBe(true); // Not the scripts/ directory
+      expect(isRelevantFile('test-utils.js')).toBe(true); // Not a test file
+      expect(isRelevantFile('myscript/file.js')).toBe(true); // Not the script/ directory
+      expect(isRelevantFile('docs-generator.js')).toBe(true); // Not the docs/ directory
+      expect(isRelevantFile('build-config.js')).toBe(true); // Not the build/ directory
+
+      // These should still be excluded (they are in excluded directories/patterns)
+      expect(isRelevantFile('script/build.js')).toBe(false); // In script/ directory
+      expect(isRelevantFile('scripts/deploy.js')).toBe(false); // In scripts/ directory
+      expect(isRelevantFile('test/helper.js')).toBe(false); // In test/ directory
+      expect(isRelevantFile('my-component.test.js')).toBe(false); // Test file
+      expect(isRelevantFile('docs/readme.js')).toBe(false); // In docs/ directory
+    });
+
     test('should exclude non-JavaScript/TypeScript files', () => {
       const { isRelevantFile } = indexModule;
       expect(isRelevantFile('README.md')).toBe(false);
