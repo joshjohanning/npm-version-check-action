@@ -1276,6 +1276,259 @@ describe('npm Version Check Action - Integration Tests', () => {
     });
   });
 
+  describe('fetchTags function', () => {
+    test('should handle fetchTags success', async () => {
+      const { fetchTags } = indexModule;
+
+      mockExec.exec.mockResolvedValue(0);
+
+      await fetchTags();
+
+      expect(mockExec.exec).toHaveBeenCalledWith('git', ['fetch', '--tags'], expect.any(Object));
+      expect(mockCore.warning).not.toHaveBeenCalled();
+    });
+
+    test('should handle fetchTags error gracefully', async () => {
+      const { fetchTags } = indexModule;
+
+      mockExec.exec.mockRejectedValue(new Error('Network error'));
+
+      await fetchTags();
+
+      expect(mockCore.warning).toHaveBeenCalledWith(
+        'Could not fetch git tags: Network error. Some version comparisons may be limited.'
+      );
+    });
+  });
+
+  describe('hasPackageDependencyChanges JSON parsing errors', () => {
+    test('should handle JSON parsing error in package.json gracefully', async () => {
+      const { hasPackageDependencyChanges } = indexModule;
+
+      // Mock execGit to return invalid JSON for package.json
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('show') && args[1] === 'def4567:package.json') {
+          options.listeners.stdout('{ invalid json }');
+        } else if (args.includes('show') && args[1] === 'abc1234:package.json') {
+          options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
+        }
+        return 0;
+      });
+
+      const result = await hasPackageDependencyChanges();
+      expect(result).toBe(true); // Should conservatively assume change on parse error
+    });
+
+    test('should handle JSON parsing error in package-lock.json gracefully', async () => {
+      const { hasPackageDependencyChanges } = indexModule;
+
+      // Mock execGit to return valid package.json but invalid package-lock.json
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('show') && args[1].includes('package.json')) {
+          options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
+        } else if (args.includes('show') && args[1] === 'def4567:package-lock.json') {
+          options.listeners.stdout('{ invalid lock json }');
+        } else if (args.includes('show') && args[1] === 'abc1234:package-lock.json') {
+          options.listeners.stdout('{ "name": "test", "version": "1.0.0", "dependencies": {} }');
+        }
+        return 0;
+      });
+
+      const result = await hasPackageDependencyChanges();
+      expect(result).toBe(true); // Should conservatively assume change on parse error
+    });
+  });
+
+  describe('run function integration tests', () => {
+    let mockFs;
+
+    beforeAll(async () => {
+      mockFs = await import('fs');
+    });
+
+    beforeEach(() => {
+      // Reset all mocks
+      jest.clearAllMocks();
+
+      // Set default successful mocks
+      mockCore.getInput.mockImplementation(input => {
+        switch (input) {
+          case 'package-path':
+            return 'package.json';
+          case 'tag-prefix':
+            return 'v';
+          case 'skip-files-check':
+            return 'false';
+          default:
+            return '';
+        }
+      });
+      mockCore.getBooleanInput.mockReturnValue(false);
+
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.1.0' }));
+
+      mockExec.exec.mockResolvedValue(0);
+    });
+
+    test('should handle package dependency changes logging', async () => {
+      const { run } = indexModule;
+
+      // Mock changed files to include package.json with dependency changes
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('diff') && args.includes('--name-only')) {
+          options.listeners.stdout('package.json\nsrc/index.js');
+        } else if (args.includes('show') && args[1] === 'def4567:package.json') {
+          options.listeners.stdout('{ "name": "test", "dependencies": { "lodash": "^4.0.0" } }');
+        } else if (args.includes('show') && args[1] === 'abc1234:package.json') {
+          options.listeners.stdout('{ "name": "test", "dependencies": { "lodash": "^4.1.0" } }');
+        } else if (args.includes('tag')) {
+          options.listeners.stdout('v1.0.0');
+        }
+        return 0;
+      });
+
+      await run();
+
+      // Should log package dependency changes detected
+      expect(mockCore.info).toHaveBeenCalledWith(
+        '✅ Package dependency changes detected, proceeding with version check...'
+      );
+    });
+
+    test('should handle regular file changes logging', async () => {
+      const { run } = indexModule;
+
+      // Mock changed files to include JS files
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('diff') && args.includes('--name-only')) {
+          options.listeners.stdout('src/index.js\nlib/utils.ts');
+        } else if (args.includes('show') && args[1].includes('package.json')) {
+          options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
+        } else if (args.includes('tag')) {
+          options.listeners.stdout('v1.0.0');
+        }
+        return 0;
+      });
+
+      await run();
+
+      // Should log JS/TS file changes detected
+      expect(mockCore.info).toHaveBeenCalledWith(
+        '✅ JavaScript/TypeScript file changes detected, proceeding with version check...'
+      );
+      expect(mockCore.info).toHaveBeenCalledWith('Changed files: src/index.js, lib/utils.ts');
+    });
+
+    test('should handle first release scenario', async () => {
+      const { run } = indexModule;
+
+      // Mock no existing tags
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('diff') && args.includes('--name-only')) {
+          options.listeners.stdout('src/index.js');
+        } else if (args.includes('tag')) {
+          options.listeners.stdout(''); // No tags
+        }
+        return 0;
+      });
+
+      await run();
+
+      expect(mockCore.notice).toHaveBeenCalledWith(
+        '🎉 No previous version tag found, this appears to be the first release.'
+      );
+      expect(mockCore.setOutput).toHaveBeenCalledWith('version-changed', 'true');
+    });
+
+    test('should handle version comparison - same version failure', async () => {
+      const { run } = indexModule;
+
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.0.0' }));
+
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('diff') && args.includes('--name-only')) {
+          options.listeners.stdout('src/index.js');
+        } else if (args.includes('tag')) {
+          options.listeners.stdout('v1.0.0');
+        }
+        return 0;
+      });
+
+      mockSemver.compare.mockReturnValue(0); // Same version
+
+      await run();
+
+      expect(mockCore.setFailed).toHaveBeenCalledWith(
+        '❌ ERROR: Package version (1.0.0) is the same as the latest release. You need to increment it.'
+      );
+      expect(mockCore.notice).toHaveBeenCalledWith(
+        `💡 HINT: Run 'npm version patch', 'npm version minor', or 'npm version major' to increment the version`
+      );
+    });
+
+    test('should handle version comparison - lower version failure', async () => {
+      const { run } = indexModule;
+
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '0.9.0' }));
+
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('diff') && args.includes('--name-only')) {
+          options.listeners.stdout('src/index.js');
+        } else if (args.includes('tag')) {
+          options.listeners.stdout('v1.0.0');
+        }
+        return 0;
+      });
+
+      mockSemver.compare.mockReturnValue(-1); // Lower version
+
+      await run();
+
+      expect(mockCore.setFailed).toHaveBeenCalledWith(
+        '❌ ERROR: Package version (0.9.0) is lower than the latest release (1.0.0)'
+      );
+      expect(mockCore.notice).toHaveBeenCalledWith(
+        '💡 HINT: Version should be higher than the previous release. Consider using semantic versioning.'
+      );
+    });
+
+    test('should handle version comparison - higher version success', async () => {
+      const { run } = indexModule;
+
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.1.0' }));
+
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('diff') && args.includes('--name-only')) {
+          options.listeners.stdout('src/index.js');
+        } else if (args.includes('tag')) {
+          options.listeners.stdout('v1.0.0');
+        }
+        return 0;
+      });
+
+      mockSemver.compare.mockReturnValue(1); // Higher version
+
+      await run();
+
+      expect(mockCore.info).toHaveBeenCalledWith('✅ Version has been properly incremented from 1.0.0 to 1.1.0');
+      expect(mockCore.info).toHaveBeenCalledWith('🎯 Semantic versioning check passed!');
+      expect(mockCore.setOutput).toHaveBeenCalledWith('version-changed', 'true');
+      expect(mockCore.info).toHaveBeenCalledWith('🏁 Version check completed successfully');
+    });
+
+    test('should handle general error in run function', async () => {
+      const { run } = indexModule;
+
+      // Mock fetchTags to throw an error that propagates up
+      mockExec.exec.mockRejectedValue(new Error('Git command failed'));
+
+      await run();
+
+      expect(mockCore.setFailed).toHaveBeenCalledWith('Action failed with error: Git command failed');
+    });
+  });
+
   describe('Package.json parsing edge cases', () => {
     let mockFs;
 
