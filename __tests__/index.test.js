@@ -160,6 +160,63 @@ describe('npm Version Check Action - Helper Functions', () => {
     });
   });
 
+  describe('sanitizeFilePath', () => {
+    test('should accept valid file paths', () => {
+      const { sanitizeFilePath } = indexModule;
+
+      expect(() => sanitizeFilePath('package.json', 'testPath')).not.toThrow();
+      expect(() => sanitizeFilePath('package-lock.json', 'testPath')).not.toThrow();
+      expect(() => sanitizeFilePath('src/index.js', 'testPath')).not.toThrow();
+      expect(() => sanitizeFilePath('nested/dir/file.ts', 'testPath')).not.toThrow();
+      expect(sanitizeFilePath('  package.json  ', 'testPath')).toBe('package.json'); // Trims whitespace
+    });
+
+    test('should reject dangerous file paths with shell metacharacters', () => {
+      const { sanitizeFilePath } = indexModule;
+
+      expect(() => sanitizeFilePath('package.json; rm -rf /', 'testPath')).toThrow('Invalid testPath: contains dangerous characters');
+      expect(() => sanitizeFilePath('package.json && echo evil', 'testPath')).toThrow('Invalid testPath: contains dangerous characters');
+      expect(() => sanitizeFilePath('package.json|cat /etc/passwd', 'testPath')).toThrow('Invalid testPath: contains dangerous characters');
+      expect(() => sanitizeFilePath('package.json`whoami`', 'testPath')).toThrow('Invalid testPath: contains dangerous characters');
+      expect(() => sanitizeFilePath('package.json$(id)', 'testPath')).toThrow('Invalid testPath: contains dangerous characters');
+      expect(() => sanitizeFilePath('package.json"evil"', 'testPath')).toThrow('Invalid testPath: contains dangerous characters');
+      expect(() => sanitizeFilePath(`package.json'evil'`, 'testPath')).toThrow('Invalid testPath: contains dangerous characters');
+      expect(() => sanitizeFilePath('package.json<evil', 'testPath')).toThrow('Invalid testPath: contains dangerous characters');
+      expect(() => sanitizeFilePath('package.json>evil', 'testPath')).toThrow('Invalid testPath: contains dangerous characters');
+    });
+
+    test('should reject path traversal attempts', () => {
+      const { sanitizeFilePath } = indexModule;
+
+      expect(() => sanitizeFilePath('../../../etc/passwd', 'testPath')).toThrow('Invalid testPath: path traversal not allowed');
+      expect(() => sanitizeFilePath('package.json/../secret', 'testPath')).toThrow('Invalid testPath: path traversal not allowed');
+      expect(() => sanitizeFilePath('./../../config', 'testPath')).toThrow('Invalid testPath: path traversal not allowed');
+    });
+
+    test('should reject absolute paths', () => {
+      const { sanitizeFilePath } = indexModule;
+
+      expect(() => sanitizeFilePath('/etc/passwd', 'testPath')).toThrow('Invalid testPath: absolute paths not allowed');
+      expect(() => sanitizeFilePath('/var/log/app.log', 'testPath')).toThrow('Invalid testPath: absolute paths not allowed');
+    });
+
+    test('should reject paths starting with dash', () => {
+      const { sanitizeFilePath } = indexModule;
+
+      expect(() => sanitizeFilePath('-rf', 'testPath')).toThrow('Invalid testPath: paths starting with \'-\' not allowed');
+      expect(() => sanitizeFilePath('--help', 'testPath')).toThrow('Invalid testPath: paths starting with \'-\' not allowed');
+    });
+
+    test('should reject null, undefined, or non-string values', () => {
+      const { sanitizeFilePath } = indexModule;
+
+      expect(() => sanitizeFilePath(null, 'testPath')).toThrow('Invalid testPath: must be a non-empty string');
+      expect(() => sanitizeFilePath(undefined, 'testPath')).toThrow('Invalid testPath: must be a non-empty string');
+      expect(() => sanitizeFilePath('', 'testPath')).toThrow('Invalid testPath: must be a non-empty string');
+      expect(() => sanitizeFilePath(123, 'testPath')).toThrow('Invalid testPath: must be a non-empty string');
+    });
+  });
+
   describe('isRelevantFile', () => {
     test('should identify JavaScript files as relevant', () => {
       const { isRelevantFile } = indexModule;

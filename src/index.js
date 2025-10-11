@@ -181,6 +181,43 @@ export function sanitizeSHA(sha, refName) {
 }
 
 /**
+ * Sanitize file path for use in git commands
+ * @param {string} filePath - The file path to sanitize
+ * @param {string} pathName - Name of the path parameter for error messages
+ * @returns {string} Sanitized file path
+ * @throws {Error} If file path is invalid or contains dangerous characters
+ */
+export function sanitizeFilePath(filePath, pathName) {
+  if (!filePath || typeof filePath !== 'string') {
+    throw new Error(`Invalid ${pathName}: must be a non-empty string`);
+  }
+
+  const cleanPath = filePath.trim();
+
+  // Check for shell metacharacters that could be used for command injection
+  if (SHELL_INJECTION_CHARS.test(cleanPath)) {
+    throw new Error(`Invalid ${pathName}: contains dangerous characters`);
+  }
+
+  // Check for path traversal attempts
+  if (cleanPath.includes('..')) {
+    throw new Error(`Invalid ${pathName}: path traversal not allowed`);
+  }
+
+  // Check for absolute paths (git show expects relative paths)
+  if (cleanPath.startsWith('/')) {
+    throw new Error(`Invalid ${pathName}: absolute paths not allowed`);
+  }
+
+  // Ensure path doesn't start with dangerous prefixes
+  if (cleanPath.startsWith('-')) {
+    throw new Error(`Invalid ${pathName}: paths starting with '-' not allowed`);
+  }
+
+  return cleanPath;
+}
+
+/**
  * Get files changed in the current PR
  */
 export async function getChangedFiles() {
@@ -270,9 +307,10 @@ export function isRelevantFile(file) {
  */
 async function getFileAtRef(filePath, ref) {
   try {
-    // Sanitize the ref parameter to prevent command injection
+    // Sanitize both parameters to prevent command injection
     const sanitizedRef = sanitizeSHA(ref, 'ref');
-    const output = await execGit(['show', `${sanitizedRef}:${filePath}`]);
+    const sanitizedFilePath = sanitizeFilePath(filePath, 'filePath');
+    const output = await execGit(['show', `${sanitizedRef}:${sanitizedFilePath}`]);
     return output && output.trim() ? output.trim() : null;
   } catch {
     // File doesn't exist at this ref or other error
