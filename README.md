@@ -14,8 +14,8 @@ This action prevents developers from forgetting to bump package.json version bef
 
 - 🎯 **Smart file detection** - Only runs when JavaScript/TypeScript/package files are modified
 - 🧠 **Intelligent dependency checking** - Distinguishes between actual dependency changes vs metadata-only changes in package.json and package-lock.json
-- � **Configurable devDependencies handling** - Choose whether devDependency changes should trigger version bumps
-- �📊 **Semantic versioning validation** - Ensures new version is higher than previous release
+- 🔧 **Configurable devDependencies handling** - Choose whether devDependency changes should trigger version bumps
+- 📊 **Semantic versioning validation** - Ensures new version is higher than previous release
 - 🏷️ **Git tag comparison** - Compares against the latest git tag
 - 🚀 **Shallow clone compatible** - Automatically fetches tags, works with default checkout
 - 🎉 **First release support** - Gracefully handles repositories with no previous tags
