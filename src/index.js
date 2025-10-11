@@ -270,7 +270,9 @@ export function isRelevantFile(file) {
  */
 async function getFileAtRef(filePath, ref) {
   try {
-    const output = await execGit(['show', `${ref}:${filePath}`]);
+    // Sanitize the ref parameter to prevent command injection
+    const sanitizedRef = sanitizeSHA(ref, 'ref');
+    const output = await execGit(['show', `${sanitizedRef}:${filePath}`]);
     return output && output.trim() ? output.trim() : null;
   } catch {
     // File doesn't exist at this ref or other error
@@ -282,12 +284,18 @@ async function getFileAtRef(filePath, ref) {
  * Deep equality check for objects (sufficient for dependency trees)
  * @param {any} a - First object to compare
  * @param {any} b - Second object to compare
+ * @param {WeakSet} [visited] - Set to track visited object pairs to prevent infinite recursion
  * @returns {boolean} True if objects are deeply equal
  */
-function deepEqual(a, b) {
+function deepEqual(a, b, visited = new WeakSet()) {
   if (a === b) return true;
   if (typeof a !== typeof b) return false;
   if (typeof a !== 'object' || a === null || b === null) return false;
+
+  // Prevent infinite recursion by tracking visited object pairs
+  if (visited.has(a) || visited.has(b)) return a === b;
+  visited.add(a);
+  visited.add(b);
 
   const aKeys = Object.keys(a);
   const bKeys = Object.keys(b);
@@ -295,7 +303,7 @@ function deepEqual(a, b) {
 
   for (const key of aKeys) {
     if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
-    if (!deepEqual(a[key], b[key])) return false;
+    if (!deepEqual(a[key], b[key], visited)) return false;
   }
   return true;
 }
