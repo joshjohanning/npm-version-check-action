@@ -402,7 +402,7 @@ export async function hasPackageDependencyChanges() {
         return true;
       }
     } else if (basePackageJsonRaw !== headPackageJsonRaw) {
-      // One exists and the other doesn't, or both are null but diff detected changes
+      // One exists and the other doesn't
       return true;
     }
 
@@ -431,7 +431,7 @@ export async function hasPackageDependencyChanges() {
         return true;
       }
     } else if (basePackageLockRaw !== headPackageLockRaw) {
-      // One exists and the other doesn't, or both are null but diff detected changes
+      // One exists and the other doesn't
       return true;
     }
 
