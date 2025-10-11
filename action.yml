@@ -19,7 +19,7 @@ inputs:
     required: false
     default: 'false'
   include-dev-dependencies:
-    description: 'Whether devDependency changes should trigger version bump requirement. Default (false) ignores devDependencies changes since they typically do not affect production functionality'
+    description: 'Whether devDependency changes should trigger version bump requirement. Default (false) ignores devDependencies changes and skips package-lock.json analysis when only devDeps change, preventing false positives from dev dependency lock file updates'
     required: false
     default: 'false'
 
