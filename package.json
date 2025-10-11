@@ -52,6 +52,7 @@
     "semver": "^7.5.4"
   },
   "devDependencies": {
+    "@joshjohanning/make-coverage-badge-better": "^1.0.1",
     "@vercel/ncc": "^0.38.1",
     "eslint": "^9.37.0",
     "eslint-config-prettier": "^9.1.0",
