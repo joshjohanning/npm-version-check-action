@@ -4,6 +4,10 @@
 
 import { jest } from '@jest/globals';
 
+// Test constants for consistent SHA values
+const TEST_HEAD_SHA = 'abc1234';
+const TEST_BASE_SHA = 'def4567';
+
 // Mock process.exit to prevent tests from exiting
 jest.spyOn(process, 'exit').mockImplementation(() => {});
 
@@ -29,11 +33,11 @@ const mockExec = {
 const mockGithub = {
   context: {
     eventName: 'pull_request',
-    sha: 'abc1234',
+    sha: TEST_HEAD_SHA,
     payload: {
       pull_request: {
         base: {
-          sha: 'def4567'
+          sha: TEST_BASE_SHA
         }
       }
     }
@@ -58,6 +62,49 @@ jest.unstable_mockModule('semver', () => ({ default: mockSemver }));
 
 // Dynamic import since we're using ES modules
 const indexModule = await import('../src/index.js');
+
+// Helper function to create a mock implementation that simulates exec.exec behavior
+function createExecMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock) {
+  return async (command, args, options) => {
+    let output = '';
+
+    // Handle fetchTags calls
+    if (args.includes('fetch') && args.includes('--tags')) {
+      output = '';
+    }
+    // Handle getChangedFiles calls
+    else if (args.includes('diff') && args.includes('--name-only')) {
+      output = '';
+    }
+    // Handle package.json file retrieval
+    else if (args.includes('show') && args.includes(`${TEST_BASE_SHA}:package.json`)) {
+      output = basePackageJson ? JSON.stringify(basePackageJson) : '';
+    } else if (args.includes('show') && args.includes(`${TEST_HEAD_SHA}:package.json`)) {
+      output = headPackageJson ? JSON.stringify(headPackageJson) : '';
+    }
+    // Handle package-lock.json file retrieval
+    else if (args.includes('show') && args.includes(`${TEST_BASE_SHA}:package-lock.json`)) {
+      if (basePackageLock) {
+        output = JSON.stringify(basePackageLock);
+      } else {
+        throw new Error('File not found');
+      }
+    } else if (args.includes('show') && args.includes(`${TEST_HEAD_SHA}:package-lock.json`)) {
+      if (headPackageLock) {
+        output = JSON.stringify(headPackageLock);
+      } else {
+        throw new Error('File not found');
+      }
+    }
+
+    // Simulate the stdout listener behavior from execGit
+    if (options?.listeners?.stdout && output) {
+      options.listeners.stdout(Buffer.from(output));
+    }
+
+    return 0; // Return exit code 0 for success
+  };
+}
 
 describe('npm Version Check Action - Helper Functions', () => {
   beforeEach(() => {
@@ -113,6 +160,93 @@ describe('npm Version Check Action - Helper Functions', () => {
     });
   });
 
+  describe('sanitizeFilePath', () => {
+    test('should accept valid file paths', () => {
+      const { sanitizeFilePath } = indexModule;
+
+      expect(() => sanitizeFilePath('package.json', 'testPath')).not.toThrow();
+      expect(() => sanitizeFilePath('package-lock.json', 'testPath')).not.toThrow();
+      expect(() => sanitizeFilePath('src/index.js', 'testPath')).not.toThrow();
+      expect(() => sanitizeFilePath('nested/dir/file.ts', 'testPath')).not.toThrow();
+      expect(sanitizeFilePath('  package.json  ', 'testPath')).toBe('package.json'); // Trims whitespace
+    });
+
+    test('should reject dangerous file paths with shell metacharacters', () => {
+      const { sanitizeFilePath } = indexModule;
+
+      expect(() => sanitizeFilePath('package.json; rm -rf /', 'testPath')).toThrow(
+        'Invalid testPath: contains dangerous characters'
+      );
+      expect(() => sanitizeFilePath('package.json && echo evil', 'testPath')).toThrow(
+        'Invalid testPath: contains dangerous characters'
+      );
+      expect(() => sanitizeFilePath('package.json|cat /etc/passwd', 'testPath')).toThrow(
+        'Invalid testPath: contains dangerous characters'
+      );
+      expect(() => sanitizeFilePath('package.json`whoami`', 'testPath')).toThrow(
+        'Invalid testPath: contains dangerous characters'
+      );
+      expect(() => sanitizeFilePath('package.json$(id)', 'testPath')).toThrow(
+        'Invalid testPath: contains dangerous characters'
+      );
+      expect(() => sanitizeFilePath('package.json"evil"', 'testPath')).toThrow(
+        'Invalid testPath: contains dangerous characters'
+      );
+      expect(() => sanitizeFilePath(`package.json'evil'`, 'testPath')).toThrow(
+        'Invalid testPath: contains dangerous characters'
+      );
+      expect(() => sanitizeFilePath('package.json<evil', 'testPath')).toThrow(
+        'Invalid testPath: contains dangerous characters'
+      );
+      expect(() => sanitizeFilePath('package.json>evil', 'testPath')).toThrow(
+        'Invalid testPath: contains dangerous characters'
+      );
+    });
+
+    test('should reject path traversal attempts', () => {
+      const { sanitizeFilePath } = indexModule;
+
+      expect(() => sanitizeFilePath('../../../etc/passwd', 'testPath')).toThrow(
+        'Invalid testPath: path traversal not allowed'
+      );
+      expect(() => sanitizeFilePath('package.json/../secret', 'testPath')).toThrow(
+        'Invalid testPath: path traversal not allowed'
+      );
+      expect(() => sanitizeFilePath('./../../config', 'testPath')).toThrow(
+        'Invalid testPath: path traversal not allowed'
+      );
+    });
+
+    test('should reject absolute paths', () => {
+      const { sanitizeFilePath } = indexModule;
+
+      expect(() => sanitizeFilePath('/etc/passwd', 'testPath')).toThrow('Invalid testPath: absolute paths not allowed');
+      expect(() => sanitizeFilePath('/var/log/app.log', 'testPath')).toThrow(
+        'Invalid testPath: absolute paths not allowed'
+      );
+    });
+
+    test('should reject paths starting with dash', () => {
+      const { sanitizeFilePath } = indexModule;
+
+      expect(() => sanitizeFilePath('-rf', 'testPath')).toThrow(
+        `Invalid testPath: paths starting with '-' not allowed`
+      );
+      expect(() => sanitizeFilePath('--help', 'testPath')).toThrow(
+        `Invalid testPath: paths starting with '-' not allowed`
+      );
+    });
+
+    test('should reject null, undefined, or non-string values', () => {
+      const { sanitizeFilePath } = indexModule;
+
+      expect(() => sanitizeFilePath(null, 'testPath')).toThrow('Invalid testPath: must be a non-empty string');
+      expect(() => sanitizeFilePath(undefined, 'testPath')).toThrow('Invalid testPath: must be a non-empty string');
+      expect(() => sanitizeFilePath('', 'testPath')).toThrow('Invalid testPath: must be a non-empty string');
+      expect(() => sanitizeFilePath(123, 'testPath')).toThrow('Invalid testPath: must be a non-empty string');
+    });
+  });
+
   describe('isRelevantFile', () => {
     test('should identify JavaScript files as relevant', () => {
       const { isRelevantFile } = indexModule;
@@ -126,23 +260,21 @@ describe('npm Version Check Action - Helper Functions', () => {
       expect(isRelevantFile('components/App.tsx')).toBe(true);
     });
 
-    test('should identify package-lock.json files as relevant but not package.json', () => {
+    test('should exclude package files from regular checking (handled by smart dependency logic)', () => {
       const { isRelevantFile } = indexModule;
-      // package.json is now handled separately via dependency checking
+      // Both package.json and package-lock.json are now handled separately via smart dependency checking
       expect(isRelevantFile('package.json')).toBe(false);
       expect(isRelevantFile('packages/core/package.json')).toBe(false);
-
-      // package-lock.json is still relevant as it reflects dependency changes
-      expect(isRelevantFile('package-lock.json')).toBe(true);
-      expect(isRelevantFile('packages/utils/package-lock.json')).toBe(true);
+      expect(isRelevantFile('package-lock.json')).toBe(false);
+      expect(isRelevantFile('packages/utils/package-lock.json')).toBe(false);
 
       // Invalid package file names should still be rejected
       expect(isRelevantFile('my-package.json')).toBe(false); // Should not match
       expect(isRelevantFile('packagejson')).toBe(false); // Should not match
       expect(isRelevantFile('some-package.json')).toBe(false); // Should not match
       expect(isRelevantFile('custom-package-lock.json')).toBe(false); // Should not match
-      expect(isRelevantFile('nested/path/package.json')).toBe(false); // package.json no longer relevant here
-      expect(isRelevantFile('deep/nested/path/package-lock.json')).toBe(true); // Should match exact filename
+      expect(isRelevantFile('nested/path/package.json')).toBe(false); // package.json excluded
+      expect(isRelevantFile('deep/nested/path/package-lock.json')).toBe(false); // package-lock.json excluded
     });
 
     test('should handle package.json pattern without ReDoS vulnerability', () => {
@@ -357,356 +489,609 @@ describe('npm Version Check Action - Helper Functions', () => {
   });
 });
 
-describe('hasPackageJsonDependencyChanges', () => {
+describe('hasPackageDependencyChanges', () => {
   beforeEach(() => {
     // Reset to default PR context
     mockGithub.context.eventName = 'pull_request';
-    mockGithub.context.sha = 'abc1234';
+    mockGithub.context.sha = TEST_HEAD_SHA;
     mockGithub.context.payload = {
       pull_request: {
-        base: { sha: 'def4567' }
+        base: { sha: TEST_BASE_SHA }
       }
     };
+
+    // Set default behavior for include-dev-dependencies (false)
+    mockCore.getBooleanInput.mockImplementation(input => {
+      if (input === 'include-dev-dependencies') return false;
+      return false; // Default for other boolean inputs
+    });
   });
 
   test('should return false for non-pull-request events', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
     mockGithub.context.eventName = 'push';
 
-    const result = await hasPackageJsonDependencyChanges();
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(false);
   });
 
   test('should return false when base or head refs are missing', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
     mockGithub.context.eventName = 'pull_request';
     mockGithub.context.payload = { pull_request: {} }; // No base ref
 
-    const result = await hasPackageJsonDependencyChanges();
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(false);
   });
 
   test('should return false when package.json has no changes', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
-    // Mock git diff to return empty output (no changes)
-    mockExec.exec.mockImplementation(async (command, args, _options) => {
-      if (args.includes('diff') && args.includes('package.json')) {
-        // Don't call stdout listener, so output remains empty
-        return 0;
+    const samePackageJson = {
+      name: 'test-package',
+      version: '1.0.0',
+      dependencies: {
+        express: '^4.18.0'
       }
+    };
+
+    mockExec.exec.mockImplementation(async (command, args, _options) => {
+      if (
+        args.includes('show') &&
+        (args.includes(`${TEST_BASE_SHA}:package.json`) || args.includes(`${TEST_HEAD_SHA}:package.json`))
+      ) {
+        return JSON.stringify(samePackageJson);
+      }
+      return '';
     });
 
-    const result = await hasPackageJsonDependencyChanges();
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(false);
   });
 
   test('should return true when dependencies section is changed', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
-    const mockDiff = `
-@@ -10,7 +10,8 @@
-   "dependencies": {
--    "express": "^4.18.0"
-+    "express": "^4.19.0",
-+    "lodash": "^4.17.21"
-   },
-   "devDependencies": {
-`;
+    const basePackageJson = {
+      name: 'test-package',
+      version: '1.0.0',
+      dependencies: {
+        express: '^4.18.0'
+      }
+    };
+
+    const headPackageJson = {
+      name: 'test-package',
+      version: '1.0.0',
+      dependencies: {
+        express: '^4.19.0',
+        lodash: '^4.17.21'
+      }
+    };
 
     mockExec.exec.mockImplementation(async (command, args, options) => {
-      if (args.includes('diff') && args.includes('package.json')) {
-        if (options.listeners && options.listeners.stdout) {
-          options.listeners.stdout(mockDiff);
-        }
-        return 0;
+      let output = '';
+
+      // Handle fetchTags calls
+      if (args.includes('fetch') && args.includes('--tags')) {
+        output = '';
       }
+      // Handle getChangedFiles calls
+      else if (args.includes('diff') && args.includes('--name-only')) {
+        output = '';
+      }
+      // Handle package.json file retrieval
+      else if (args.includes('show') && args.includes(`${TEST_BASE_SHA}:package.json`)) {
+        output = JSON.stringify(basePackageJson);
+      } else if (args.includes('show') && args.includes(`${TEST_HEAD_SHA}:package.json`)) {
+        output = JSON.stringify(headPackageJson);
+      }
+      // Handle package-lock.json (return error to indicate no file)
+      else if (args.includes('show') && args.includes('package-lock.json')) {
+        throw new Error('File not found');
+      }
+
+      // Simulate the stdout listener behavior from execGit
+      if (options?.listeners?.stdout && output) {
+        options.listeners.stdout(Buffer.from(output));
+      }
+
+      return 0; // Return exit code 0 for success
     });
 
-    const result = await hasPackageJsonDependencyChanges();
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(true);
   });
 
   test('should return true when peerDependencies section is changed', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
-    const mockDiff = `
-@@ -15,6 +15,9 @@
-   },
-   "peerDependencies": {
--    "react": "^18.0.0"
-+    "react": "^18.2.0",
-+    "react-dom": "^18.2.0"
-   }
-`;
-
-    mockExec.exec.mockImplementation(async (command, args, options) => {
-      if (args.includes('diff') && args.includes('package.json')) {
-        if (options.listeners && options.listeners.stdout) {
-          options.listeners.stdout(mockDiff);
-        }
-        return 0;
+    const basePackageJson = {
+      name: 'test-package',
+      version: '1.0.0',
+      peerDependencies: {
+        react: '^18.0.0'
       }
-    });
+    };
 
-    const result = await hasPackageJsonDependencyChanges();
+    const headPackageJson = {
+      name: 'test-package',
+      version: '1.0.0',
+      peerDependencies: {
+        react: '^18.2.0',
+        'react-dom': '^18.2.0'
+      }
+    };
+
+    mockExec.exec.mockImplementation(createExecMock(basePackageJson, headPackageJson));
+
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(true);
   });
 
   test('should return true when optionalDependencies section is changed', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
-    const mockDiff = `
-@@ -20,4 +20,7 @@
-   "optionalDependencies": {
-+    "fsevents": "^2.3.0"
-   }
-`;
-
-    mockExec.exec.mockImplementation(async (command, args, options) => {
-      if (args.includes('diff') && args.includes('package.json')) {
-        if (options.listeners && options.listeners.stdout) {
-          options.listeners.stdout(mockDiff);
-        }
-        return 0;
+    const basePackageJson = {
+      name: 'test-package',
+      version: '1.0.0',
+      optionalDependencies: {
+        'some-optional': '^1.0.0'
       }
-    });
+    };
 
-    const result = await hasPackageJsonDependencyChanges();
+    const headPackageJson = {
+      name: 'test-package',
+      version: '1.0.0',
+      optionalDependencies: {
+        'some-optional': '^1.0.0',
+        fsevents: '^2.3.0'
+      }
+    };
+
+    mockExec.exec.mockImplementation(createExecMock(basePackageJson, headPackageJson));
+
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(true);
   });
 
   test('should return true when bundleDependencies section is changed', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
-    const mockDiff = `
-@@ -25,4 +25,6 @@
-   "bundleDependencies": [
-+    "my-internal-lib"
-   ]
-`;
+    const basePackageJson = {
+      name: 'test-package',
+      version: '1.0.0',
+      bundleDependencies: ['existing-lib']
+    };
 
-    mockExec.exec.mockImplementation(async (command, args, options) => {
-      if (args.includes('diff') && args.includes('package.json')) {
-        if (options.listeners && options.listeners.stdout) {
-          options.listeners.stdout(mockDiff);
-        }
-        return 0;
-      }
-    });
+    const headPackageJson = {
+      name: 'test-package',
+      version: '1.0.0',
+      bundleDependencies: ['existing-lib', 'my-internal-lib']
+    };
 
-    const result = await hasPackageJsonDependencyChanges();
+    mockExec.exec.mockImplementation(createExecMock(basePackageJson, headPackageJson));
+
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(true);
   });
 
   test('should return true when bundledDependencies section is changed', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
-    const mockDiff = `
-@@ -25,4 +25,6 @@
-   "bundledDependencies": [
-+    "my-other-lib"
-   ]
-`;
+    const basePackageJson = {
+      name: 'test-package',
+      version: '1.0.0',
+      bundledDependencies: ['existing-lib']
+    };
 
-    mockExec.exec.mockImplementation(async (command, args, options) => {
-      if (args.includes('diff') && args.includes('package.json')) {
-        if (options.listeners && options.listeners.stdout) {
-          options.listeners.stdout(mockDiff);
-        }
-        return 0;
-      }
-    });
+    const headPackageJson = {
+      name: 'test-package',
+      version: '1.0.0',
+      bundledDependencies: ['existing-lib', 'my-other-lib']
+    };
 
-    const result = await hasPackageJsonDependencyChanges();
+    mockExec.exec.mockImplementation(createExecMock(basePackageJson, headPackageJson));
+
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(true);
   });
 
   test('should return false when only metadata changes are present', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
-    const mockDiff = `
-@@ -1,8 +1,9 @@
- {
-   "name": "my-package",
--  "version": "1.0.0",
-+  "version": "1.0.1",
-   "description": "Updated description",
--  "author": "John Doe"
-+  "author": "John Doe",
-+  "keywords": ["test", "package"]
- }
-`;
+    // Base package.json with original metadata
+    const basePackageJson = {
+      name: 'my-package',
+      version: '1.0.0',
+      description: 'Original description',
+      author: 'John Doe'
+    };
 
-    mockExec.exec.mockImplementation(async (command, args, options) => {
-      if (args.includes('diff') && args.includes('package.json')) {
-        if (options.listeners && options.listeners.stdout) {
-          options.listeners.stdout(mockDiff);
-        }
-        return 0;
-      }
-    });
+    // Head package.json with only metadata changes (no dependency changes)
+    const headPackageJson = {
+      name: 'my-package',
+      version: '1.0.1',
+      description: 'Updated description',
+      author: 'John Doe',
+      keywords: ['test', 'package']
+    };
 
-    const result = await hasPackageJsonDependencyChanges();
+    // Ensure include-dev-dependencies is false (default)
+    mockCore.getBooleanInput.mockReturnValue(false);
+
+    mockExec.exec.mockImplementation(createExecMock(basePackageJson, headPackageJson));
+
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(false);
   });
 
-  test('should return false when only devDependencies are changed', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+  test('should return false when only devDependencies are changed (default behavior)', async () => {
+    const { hasPackageDependencyChanges } = indexModule;
 
-    const mockDiff = `
-@@ -15,7 +15,8 @@
-   "devDependencies": {
--    "jest": "^29.0.0"
-+    "jest": "^29.5.0",
-+    "eslint": "^8.0.0"
-   }
-`;
-
-    mockExec.exec.mockImplementation(async (command, args, options) => {
-      if (args.includes('diff') && args.includes('package.json')) {
-        if (options.listeners && options.listeners.stdout) {
-          options.listeners.stdout(mockDiff);
-        }
-        return 0;
+    const basePackageJson = {
+      name: 'test-package',
+      version: '1.0.0',
+      devDependencies: {
+        jest: '^29.0.0'
       }
+    };
+
+    const headPackageJson = {
+      name: 'test-package',
+      version: '1.0.0',
+      devDependencies: {
+        jest: '^29.5.0',
+        eslint: '^8.0.0'
+      }
+    };
+
+    // Ensure include-dev-dependencies is false (default)
+    mockCore.getBooleanInput.mockReturnValue(false);
+
+    mockExec.exec.mockImplementation(createExecMock(basePackageJson, headPackageJson));
+
+    const result = await hasPackageDependencyChanges();
+    expect(result).toBe(false);
+  });
+
+  test('should return true when devDependencies are changed and include-dev-dependencies is true', async () => {
+    const { hasPackageDependencyChanges } = indexModule;
+
+    const basePackageJson = {
+      name: 'test-package',
+      version: '1.0.0',
+      devDependencies: {
+        jest: '^29.0.0'
+      }
+    };
+
+    const headPackageJson = {
+      name: 'test-package',
+      version: '1.0.0',
+      devDependencies: {
+        jest: '^29.5.0',
+        eslint: '^8.0.0'
+      }
+    };
+
+    // Configure to include devDependencies in version bump requirement
+    mockCore.getBooleanInput.mockImplementation(input => {
+      if (input === 'include-dev-dependencies') return true;
+      return false;
     });
 
-    const result = await hasPackageJsonDependencyChanges();
-    expect(result).toBe(false);
+    mockExec.exec.mockImplementation(createExecMock(basePackageJson, headPackageJson));
+
+    const result = await hasPackageDependencyChanges();
+    expect(result).toBe(true);
   });
 
   test('should return false when only scripts are changed', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
-    const mockDiff = `
-@@ -10,6 +10,7 @@
-   "scripts": {
-     "test": "jest",
--    "build": "webpack"
-+    "build": "webpack --mode=production",
-+    "dev": "webpack --mode=development"
-   }
-`;
-
-    mockExec.exec.mockImplementation(async (command, args, options) => {
-      if (args.includes('diff') && args.includes('package.json')) {
-        if (options.listeners && options.listeners.stdout) {
-          options.listeners.stdout(mockDiff);
-        }
-        return 0;
+    const basePackageJson = {
+      name: 'test-package',
+      version: '1.0.0',
+      scripts: {
+        test: 'jest',
+        build: 'webpack'
       }
-    });
+    };
 
-    const result = await hasPackageJsonDependencyChanges();
+    const headPackageJson = {
+      name: 'test-package',
+      version: '1.0.0',
+      scripts: {
+        test: 'jest',
+        build: 'webpack --mode=production',
+        dev: 'webpack --mode=development'
+      }
+    };
+
+    // Ensure include-dev-dependencies is false (default)
+    mockCore.getBooleanInput.mockReturnValue(false);
+
+    mockExec.exec.mockImplementation(createExecMock(basePackageJson, headPackageJson));
+
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(false);
   });
 
   test('should return true when mixed changes include dependencies', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
-    const mockDiff = `
-@@ -1,15 +1,17 @@
- {
-   "name": "my-package",
--  "version": "1.0.0",
-+  "version": "1.1.0",
-   "description": "Updated description",
-   "dependencies": {
--    "express": "^4.18.0"
-+    "express": "^4.19.0",
-+    "lodash": "^4.17.21"
-   },
-   "devDependencies": {
--    "jest": "^29.0.0"
-+    "jest": "^29.5.0"
-   }
- }
-`;
-
-    mockExec.exec.mockImplementation(async (command, args, options) => {
-      if (args.includes('diff') && args.includes('package.json')) {
-        if (options.listeners && options.listeners.stdout) {
-          options.listeners.stdout(mockDiff);
-        }
-        return 0;
+    const basePackageJson = {
+      name: 'my-package',
+      version: '1.0.0',
+      description: 'Old description',
+      dependencies: {
+        express: '^4.18.0'
+      },
+      devDependencies: {
+        jest: '^29.0.0'
       }
-    });
+    };
 
-    const result = await hasPackageJsonDependencyChanges();
+    const headPackageJson = {
+      name: 'my-package',
+      version: '1.1.0',
+      description: 'Updated description',
+      dependencies: {
+        express: '^4.19.0',
+        lodash: '^4.17.21'
+      },
+      devDependencies: {
+        jest: '^29.5.0'
+      }
+    };
+
+    mockExec.exec.mockImplementation(createExecMock(basePackageJson, headPackageJson));
+
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(true);
   });
 
   test('should return true when git command fails (err on side of caution)', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
-    mockExec.exec.mockImplementation(async (command, args, _options) => {
-      if (args.includes('diff') && args.includes('package.json')) {
-        throw new Error('Git command failed');
+    // Simulate a critical error that happens before getFileAtRef is called,
+    // such as during SHA sanitization or context setup
+    mockGithub.context.eventName = 'pull_request';
+    mockGithub.context.sha = TEST_HEAD_SHA;
+    mockGithub.context.payload = {
+      pull_request: {
+        base: { sha: 'invalid;injection' } // This should trigger sanitizeSHA error
       }
-    });
+    };
 
-    const result = await hasPackageJsonDependencyChanges();
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(true);
     expect(mockCore.warning).toHaveBeenCalledWith(
-      expect.stringContaining('Warning: Could not check package.json dependency changes')
+      expect.stringContaining('Warning: Could not check package dependency changes')
     );
   });
 
   test('should sanitize SHA values properly', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
-    mockExec.exec.mockImplementation(async (command, args, _options) => {
-      // Verify the SHA values were sanitized properly
-      expect(args).toContain('def4567'); // baseRef
-      expect(args).toContain('abc1234'); // headRef
-      expect(args).toContain('package.json');
+    mockExec.exec.mockImplementation(async (command, args, options) => {
+      // Simulate successful response for package.json to avoid null content
+      if (args.includes('show') && args.includes('package.json')) {
+        const mockPackageJson = { name: 'test', version: '1.0.0' };
+        if (options?.listeners?.stdout) {
+          options.listeners.stdout(Buffer.from(JSON.stringify(mockPackageJson)));
+        }
+      }
       return 0;
     });
 
-    await hasPackageJsonDependencyChanges();
-    expect(mockExec.exec).toHaveBeenCalledWith(
-      'git',
-      ['diff', 'def4567', 'abc1234', '--', 'package.json'],
-      expect.any(Object)
-    );
+    await hasPackageDependencyChanges();
+    // Verify that the git show commands are called with sanitized SHA values
+    expect(mockExec.exec).toHaveBeenCalledWith('git', ['show', `${TEST_BASE_SHA}:package.json`], expect.any(Object));
+    expect(mockExec.exec).toHaveBeenCalledWith('git', ['show', `${TEST_HEAD_SHA}:package.json`], expect.any(Object));
   });
 
   test('should handle complex dependency diffs with multiple sections', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
-    const mockDiff = `
-@@ -1,20 +1,25 @@
- {
-   "name": "complex-package",
-   "dependencies": {
--    "express": "^4.18.0"
-+    "express": "^4.19.0"
-   },
-   "peerDependencies": {
-+    "react": "^18.0.0"
-   },
-   "scripts": {
-     "test": "jest",
--    "build": "webpack"
-+    "build": "webpack --mode=production"
-   },
-   "optionalDependencies": {
-+    "fsevents": "^2.3.0"
-   }
- }
-`;
+    const basePackageJson = {
+      name: 'complex-package',
+      dependencies: {
+        express: '^4.18.0'
+      },
+      peerDependencies: {},
+      scripts: {
+        test: 'jest',
+        build: 'webpack'
+      },
+      optionalDependencies: {}
+    };
 
-    mockExec.exec.mockImplementation(async (command, args, options) => {
-      if (args.includes('diff') && args.includes('package.json')) {
-        if (options.listeners && options.listeners.stdout) {
-          options.listeners.stdout(mockDiff);
-        }
-        return 0;
+    const headPackageJson = {
+      name: 'complex-package',
+      dependencies: {
+        express: '^4.19.0'
+      },
+      peerDependencies: {
+        react: '^18.0.0'
+      },
+      scripts: {
+        test: 'jest',
+        build: 'webpack --mode=production'
+      },
+      optionalDependencies: {
+        fsevents: '^2.3.0'
       }
-    });
+    };
 
-    const result = await hasPackageJsonDependencyChanges();
+    mockExec.exec.mockImplementation(createExecMock(basePackageJson, headPackageJson));
+
+    const result = await hasPackageDependencyChanges();
+    expect(result).toBe(true);
+  });
+
+  test('should return true when package-lock.json has actual dependency changes', async () => {
+    const { hasPackageDependencyChanges } = indexModule;
+
+    // Base package-lock.json with existing dependencies
+    const basePackageLock = {
+      name: 'test-package',
+      version: '1.0.0',
+      lockfileVersion: 2,
+      dependencies: {
+        'some-package': {
+          version: '1.0.0',
+          resolved: 'https://registry.npmjs.org/some-package/-/some-package-1.0.0.tgz',
+          integrity: 'sha512-oldintegrity'
+        }
+      }
+    };
+
+    // Head package-lock.json with new dependencies
+    const headPackageLock = {
+      name: 'test-package',
+      version: '1.0.0',
+      lockfileVersion: 2,
+      dependencies: {
+        'some-package': {
+          version: '1.1.0',
+          resolved: 'https://registry.npmjs.org/some-package/-/some-package-1.1.0.tgz',
+          integrity: 'sha512-newintegrity'
+        },
+        'new-dependency': {
+          version: '2.0.0',
+          resolved: 'https://registry.npmjs.org/new-dependency/-/new-dependency-2.0.0.tgz',
+          integrity: 'sha512-newdepintegrity',
+          dependencies: {
+            'sub-dep': '^1.0.0'
+          }
+        }
+      }
+    };
+
+    // No package.json changes, only package-lock.json changes
+    const packageJson = {
+      name: 'test-package',
+      version: '1.0.0'
+    };
+
+    mockExec.exec.mockImplementation(createExecMock(packageJson, packageJson, basePackageLock, headPackageLock));
+
+    const result = await hasPackageDependencyChanges();
+    expect(result).toBe(true);
+  });
+
+  test('should return false when package-lock.json has only version metadata changes', async () => {
+    const { hasPackageDependencyChanges } = indexModule;
+
+    // Base package.json - no changes
+    const basePackageJson = {
+      name: 'my-package',
+      version: '1.0.0'
+    };
+
+    const headPackageJson = {
+      name: 'my-package',
+      version: '1.0.0'
+    };
+
+    // Base package-lock.json with dependencies
+    const basePackageLock = {
+      name: 'my-package',
+      version: '1.0.0',
+      lockfileVersion: 2,
+      requires: true,
+      dependencies: {
+        express: {
+          version: '4.18.0',
+          resolved: 'https://registry.npmjs.org/express/-/express-4.18.0.tgz',
+          integrity: 'sha512-example'
+        }
+      }
+    };
+
+    // Head package-lock.json with same dependencies, only top-level version changed
+    const headPackageLock = {
+      name: 'my-package',
+      version: '1.0.1',
+      lockfileVersion: 2,
+      requires: true,
+      dependencies: {
+        express: {
+          version: '4.18.0',
+          resolved: 'https://registry.npmjs.org/express/-/express-4.18.0.tgz',
+          integrity: 'sha512-example'
+        }
+      }
+    };
+
+    mockExec.exec.mockImplementation(
+      createExecMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock)
+    );
+
+    const result = await hasPackageDependencyChanges();
+    expect(result).toBe(false);
+  });
+
+  test('should return true when both package.json and package-lock.json have changes', async () => {
+    const { hasPackageDependencyChanges } = indexModule;
+
+    // Base package.json
+    const basePackageJson = {
+      name: 'test-package',
+      version: '1.0.0',
+      dependencies: {
+        express: '^4.18.0'
+      }
+    };
+
+    // Head package.json with new dependency
+    const headPackageJson = {
+      name: 'test-package',
+      version: '1.0.0',
+      dependencies: {
+        express: '^4.19.0',
+        lodash: '^4.17.21'
+      }
+    };
+
+    // Base package-lock.json
+    const basePackageLock = {
+      name: 'test-package',
+      version: '1.0.0',
+      lockfileVersion: 2,
+      dependencies: {
+        express: {
+          version: '4.18.0',
+          resolved: 'https://registry.npmjs.org/express/-/express-4.18.0.tgz'
+        }
+      }
+    };
+
+    // Head package-lock.json with updated and new dependencies
+    const headPackageLock = {
+      name: 'test-package',
+      version: '1.0.0',
+      lockfileVersion: 2,
+      dependencies: {
+        express: {
+          version: '4.19.0',
+          resolved: 'https://registry.npmjs.org/express/-/express-4.19.0.tgz'
+        },
+        lodash: {
+          version: '4.17.21',
+          resolved: 'https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz',
+          integrity: 'sha512-newintegrity'
+        }
+      }
+    };
+
+    mockExec.exec.mockImplementation(
+      createExecMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock)
+    );
+
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(true);
   });
 });
@@ -715,10 +1100,10 @@ describe('npm Version Check Action - Integration Tests', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockGithub.context.eventName = 'pull_request';
-    mockGithub.context.sha = 'abc1234';
+    mockGithub.context.sha = TEST_HEAD_SHA;
     mockGithub.context.payload = {
       pull_request: {
-        base: { sha: 'def4567' }
+        base: { sha: TEST_BASE_SHA }
       }
     };
   });
@@ -736,11 +1121,11 @@ describe('npm Version Check Action - Integration Tests', () => {
         return 0;
       });
 
-      const result = await execGit(['diff', '--name-only', 'abc1234', 'def4567']);
+      const result = await execGit(['diff', '--name-only', TEST_HEAD_SHA, TEST_BASE_SHA]);
       expect(result).toBe('git output');
       expect(mockExec.exec).toHaveBeenCalledWith(
         'git',
-        ['diff', '--name-only', 'abc1234', 'def4567'],
+        ['diff', '--name-only', TEST_HEAD_SHA, TEST_BASE_SHA],
         expect.objectContaining({
           listeners: expect.any(Object),
           silent: true
@@ -758,7 +1143,7 @@ describe('npm Version Check Action - Integration Tests', () => {
         throw new Error('Command failed');
       });
 
-      await expect(execGit(['diff', '--name-only', 'abc1234', 'def4567'])).rejects.toThrow(
+      await expect(execGit(['diff', '--name-only', TEST_HEAD_SHA, TEST_BASE_SHA])).rejects.toThrow(
         'Git command failed: git error message'
       );
     });
@@ -816,7 +1201,7 @@ describe('npm Version Check Action - Integration Tests', () => {
       const { execGit } = indexModule;
       mockExec.exec.mockResolvedValue(0);
 
-      await expect(execGit(['diff', '--name-only', 'abc1234', 'def4567'])).resolves.not.toThrow();
+      await expect(execGit(['diff', '--name-only', TEST_HEAD_SHA, TEST_BASE_SHA])).resolves.not.toThrow();
       await expect(execGit(['fetch', '--tags'])).resolves.not.toThrow();
       await expect(execGit(['tag', '-l'])).resolves.not.toThrow();
     });
@@ -825,8 +1210,8 @@ describe('npm Version Check Action - Integration Tests', () => {
       const { execGit } = indexModule;
       mockExec.exec.mockResolvedValue(0);
 
-      // Should not throw for the double dash separator used in hasPackageJsonDependencyChanges
-      await expect(execGit(['diff', 'abc1234', 'def4567', '--', 'package.json'])).resolves.not.toThrow();
+      // Should not throw for the double dash separator used in hasPackageDependencyChanges
+      await expect(execGit(['diff', TEST_HEAD_SHA, TEST_BASE_SHA, '--', 'package.json'])).resolves.not.toThrow();
     });
   });
   describe('getChangedFiles function', () => {
@@ -871,8 +1256,8 @@ describe('npm Version Check Action - Integration Tests', () => {
       await expect(getChangedFiles()).rejects.toThrow('Invalid baseRef format');
 
       // Reset to valid values
-      mockGithub.context.payload.pull_request.base.sha = 'def4567';
-      mockGithub.context.sha = 'abc1234';
+      mockGithub.context.payload.pull_request.base.sha = TEST_BASE_SHA;
+      mockGithub.context.sha = TEST_HEAD_SHA;
     });
   });
   describe('getLatestVersionTag function', () => {
@@ -997,6 +1382,259 @@ describe('npm Version Check Action - Integration Tests', () => {
       const changedFiles = ['README.md', '__tests__/unit.test.js', 'docs/api.md', 'jest.config.js'];
 
       expect(hasRelevantFileChanges(changedFiles)).toBe(false);
+    });
+  });
+
+  describe('fetchTags function', () => {
+    test('should handle fetchTags success', async () => {
+      const { fetchTags } = indexModule;
+
+      mockExec.exec.mockResolvedValue(0);
+
+      await fetchTags();
+
+      expect(mockExec.exec).toHaveBeenCalledWith('git', ['fetch', '--tags'], expect.any(Object));
+      expect(mockCore.warning).not.toHaveBeenCalled();
+    });
+
+    test('should handle fetchTags error gracefully', async () => {
+      const { fetchTags } = indexModule;
+
+      mockExec.exec.mockRejectedValue(new Error('Network error'));
+
+      await fetchTags();
+
+      expect(mockCore.warning).toHaveBeenCalledWith(
+        'Could not fetch git tags: Network error. Some version comparisons may be limited.'
+      );
+    });
+  });
+
+  describe('hasPackageDependencyChanges JSON parsing errors', () => {
+    test('should handle JSON parsing error in package.json gracefully', async () => {
+      const { hasPackageDependencyChanges } = indexModule;
+
+      // Mock execGit to return invalid JSON for package.json
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:package.json`) {
+          options.listeners.stdout('{ invalid json }');
+        } else if (args.includes('show') && args[1] === `${TEST_HEAD_SHA}:package.json`) {
+          options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
+        }
+        return 0;
+      });
+
+      const result = await hasPackageDependencyChanges();
+      expect(result).toBe(true); // Should conservatively assume change on parse error
+    });
+
+    test('should handle JSON parsing error in package-lock.json gracefully', async () => {
+      const { hasPackageDependencyChanges } = indexModule;
+
+      // Mock execGit to return valid package.json but invalid package-lock.json
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('show') && args[1].includes('package.json')) {
+          options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
+        } else if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:package-lock.json`) {
+          options.listeners.stdout('{ invalid lock json }');
+        } else if (args.includes('show') && args[1] === `${TEST_HEAD_SHA}:package-lock.json`) {
+          options.listeners.stdout('{ "name": "test", "version": "1.0.0", "dependencies": {} }');
+        }
+        return 0;
+      });
+
+      const result = await hasPackageDependencyChanges();
+      expect(result).toBe(true); // Should conservatively assume change on parse error
+    });
+  });
+
+  describe('run function integration tests', () => {
+    let mockFs;
+
+    beforeAll(async () => {
+      mockFs = await import('fs');
+    });
+
+    beforeEach(() => {
+      // Reset all mocks
+      jest.clearAllMocks();
+
+      // Set default successful mocks
+      mockCore.getInput.mockImplementation(input => {
+        switch (input) {
+          case 'package-path':
+            return 'package.json';
+          case 'tag-prefix':
+            return 'v';
+          case 'skip-files-check':
+            return 'false';
+          default:
+            return '';
+        }
+      });
+      mockCore.getBooleanInput.mockReturnValue(false);
+
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.1.0' }));
+
+      mockExec.exec.mockResolvedValue(0);
+    });
+
+    test('should handle package dependency changes logging', async () => {
+      const { run } = indexModule;
+
+      // Mock changed files to include package.json with dependency changes
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('diff') && args.includes('--name-only')) {
+          options.listeners.stdout('package.json\nsrc/index.js');
+        } else if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:package.json`) {
+          options.listeners.stdout('{ "name": "test", "dependencies": { "lodash": "^4.0.0" } }');
+        } else if (args.includes('show') && args[1] === `${TEST_HEAD_SHA}:package.json`) {
+          options.listeners.stdout('{ "name": "test", "dependencies": { "lodash": "^4.1.0" } }');
+        } else if (args.includes('tag')) {
+          options.listeners.stdout('v1.0.0');
+        }
+        return 0;
+      });
+
+      await run();
+
+      // Should log package dependency changes detected
+      expect(mockCore.info).toHaveBeenCalledWith(
+        '✅ Package dependency changes detected, proceeding with version check...'
+      );
+    });
+
+    test('should handle regular file changes logging', async () => {
+      const { run } = indexModule;
+
+      // Mock changed files to include JS files
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('diff') && args.includes('--name-only')) {
+          options.listeners.stdout('src/index.js\nlib/utils.ts');
+        } else if (args.includes('show') && args[1].includes('package.json')) {
+          options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
+        } else if (args.includes('tag')) {
+          options.listeners.stdout('v1.0.0');
+        }
+        return 0;
+      });
+
+      await run();
+
+      // Should log JS/TS file changes detected
+      expect(mockCore.info).toHaveBeenCalledWith(
+        '✅ JavaScript/TypeScript file changes detected, proceeding with version check...'
+      );
+      expect(mockCore.info).toHaveBeenCalledWith('Changed files: src/index.js, lib/utils.ts');
+    });
+
+    test('should handle first release scenario', async () => {
+      const { run } = indexModule;
+
+      // Mock no existing tags
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('diff') && args.includes('--name-only')) {
+          options.listeners.stdout('src/index.js');
+        } else if (args.includes('tag')) {
+          options.listeners.stdout(''); // No tags
+        }
+        return 0;
+      });
+
+      await run();
+
+      expect(mockCore.notice).toHaveBeenCalledWith(
+        '🎉 No previous version tag found, this appears to be the first release.'
+      );
+      expect(mockCore.setOutput).toHaveBeenCalledWith('version-changed', 'true');
+    });
+
+    test('should handle version comparison - same version failure', async () => {
+      const { run } = indexModule;
+
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.0.0' }));
+
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('diff') && args.includes('--name-only')) {
+          options.listeners.stdout('src/index.js');
+        } else if (args.includes('tag')) {
+          options.listeners.stdout('v1.0.0');
+        }
+        return 0;
+      });
+
+      mockSemver.compare.mockReturnValue(0); // Same version
+
+      await run();
+
+      expect(mockCore.setFailed).toHaveBeenCalledWith(
+        '❌ ERROR: Package version (1.0.0) is the same as the latest release. You need to increment it.'
+      );
+      expect(mockCore.notice).toHaveBeenCalledWith(
+        `💡 HINT: Run 'npm version patch', 'npm version minor', or 'npm version major' to increment the version`
+      );
+    });
+
+    test('should handle version comparison - lower version failure', async () => {
+      const { run } = indexModule;
+
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '0.9.0' }));
+
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('diff') && args.includes('--name-only')) {
+          options.listeners.stdout('src/index.js');
+        } else if (args.includes('tag')) {
+          options.listeners.stdout('v1.0.0');
+        }
+        return 0;
+      });
+
+      mockSemver.compare.mockReturnValue(-1); // Lower version
+
+      await run();
+
+      expect(mockCore.setFailed).toHaveBeenCalledWith(
+        '❌ ERROR: Package version (0.9.0) is lower than the latest release (1.0.0)'
+      );
+      expect(mockCore.notice).toHaveBeenCalledWith(
+        '💡 HINT: Version should be higher than the previous release. Consider using semantic versioning.'
+      );
+    });
+
+    test('should handle version comparison - higher version success', async () => {
+      const { run } = indexModule;
+
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.1.0' }));
+
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('diff') && args.includes('--name-only')) {
+          options.listeners.stdout('src/index.js');
+        } else if (args.includes('tag')) {
+          options.listeners.stdout('v1.0.0');
+        }
+        return 0;
+      });
+
+      mockSemver.compare.mockReturnValue(1); // Higher version
+
+      await run();
+
+      expect(mockCore.info).toHaveBeenCalledWith('✅ Version has been properly incremented from 1.0.0 to 1.1.0');
+      expect(mockCore.info).toHaveBeenCalledWith('🎯 Semantic versioning check passed!');
+      expect(mockCore.setOutput).toHaveBeenCalledWith('version-changed', 'true');
+      expect(mockCore.info).toHaveBeenCalledWith('🏁 Version check completed successfully');
+    });
+
+    test('should handle general error in run function', async () => {
+      const { run } = indexModule;
+
+      // Mock fetchTags to throw an error that propagates up
+      mockExec.exec.mockRejectedValue(new Error('Git command failed'));
+
+      await run();
+
+      expect(mockCore.setFailed).toHaveBeenCalledWith('Action failed with error: Git command failed');
     });
   });
 

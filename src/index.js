@@ -6,7 +6,7 @@ import * as path from 'path';
 import semver from 'semver';
 
 // Shared constants for validation
-const SAFE_GIT_COMMANDS = ['diff', 'fetch', 'tag'];
+const SAFE_GIT_COMMANDS = ['diff', 'fetch', 'tag', 'show'];
 const SAFE_GIT_OPTIONS = ['-l', '--name-only', '--tags', '--'];
 const SHA_PATTERN = /^[a-f0-9]{7,40}$/i;
 // Pattern to detect shell metacharacters and other dangerous characters for command injection prevention
@@ -34,7 +34,9 @@ const EXCLUDED_DIRECTORIES = [
 ];
 const EXCLUDED_FILE_PATTERNS = ['.test.', '.spec.', '.config.'];
 const EXCLUDED_FILE_START_PATTERNS = ['test.', 'spec.'];
-const PACKAGE_FILENAMES = ['package.json', 'package-lock.json'];
+const PACKAGE_JSON_FILENAME = 'package.json';
+const PACKAGE_LOCK_JSON_FILENAME = 'package-lock.json';
+const PACKAGE_FILENAMES = [PACKAGE_JSON_FILENAME, PACKAGE_LOCK_JSON_FILENAME];
 
 /**
  * Log a message using GitHub Actions core logging
@@ -179,6 +181,43 @@ export function sanitizeSHA(sha, refName) {
 }
 
 /**
+ * Sanitize file path for use in git commands
+ * @param {string} filePath - The file path to sanitize
+ * @param {string} pathName - Name of the path parameter for error messages
+ * @returns {string} Sanitized file path
+ * @throws {Error} If file path is invalid or contains dangerous characters
+ */
+export function sanitizeFilePath(filePath, pathName) {
+  if (!filePath || typeof filePath !== 'string') {
+    throw new Error(`Invalid ${pathName}: must be a non-empty string`);
+  }
+
+  const cleanPath = filePath.trim();
+
+  // Check for shell metacharacters that could be used for command injection
+  if (SHELL_INJECTION_CHARS.test(cleanPath)) {
+    throw new Error(`Invalid ${pathName}: contains dangerous characters`);
+  }
+
+  // Check for path traversal attempts
+  if (cleanPath.includes('..')) {
+    throw new Error(`Invalid ${pathName}: path traversal not allowed`);
+  }
+
+  // Check for absolute paths (git show expects relative paths)
+  if (cleanPath.startsWith('/')) {
+    throw new Error(`Invalid ${pathName}: absolute paths not allowed`);
+  }
+
+  // Ensure path doesn't start with dangerous prefixes
+  if (cleanPath.startsWith('-')) {
+    throw new Error(`Invalid ${pathName}: paths starting with '-' not allowed`);
+  }
+
+  return cleanPath;
+}
+
+/**
  * Get files changed in the current PR
  */
 export async function getChangedFiles() {
@@ -250,10 +289,10 @@ export function isRelevantFile(file) {
     return PACKAGE_FILENAMES.includes(fileName);
   };
 
-  // Include package-lock.json (dependency changes reflected here)
-  // but exclude package.json since we need to check dependencies specifically
-  if (isPackageFile(file) && path.basename(file) !== 'package.json') {
-    return true;
+  // Exclude both package.json and package-lock.json from regular file checking
+  // They need smart dependency analysis instead of blanket inclusion
+  if (isPackageFile(file)) {
+    return false;
   }
 
   // At this point, include only JavaScript/TypeScript files (package files were already handled above)
@@ -261,11 +300,58 @@ export function isRelevantFile(file) {
 }
 
 /**
- * Check if package.json has dependency changes (not just metadata changes)
+ * Get file content at a specific git ref
+ * @param {string} filePath - The file path to retrieve
+ * @param {string} ref - The git reference (SHA, branch, etc.)
+ * @returns {Promise<string|null>} The file content or null if not found
  */
-export async function hasPackageJsonDependencyChanges() {
+async function getFileAtRef(filePath, ref) {
   try {
-    // Get the diff for package.json specifically
+    // Sanitize both parameters to prevent command injection
+    const sanitizedRef = sanitizeSHA(ref, 'ref');
+    const sanitizedFilePath = sanitizeFilePath(filePath, 'filePath');
+    const output = await execGit(['show', `${sanitizedRef}:${sanitizedFilePath}`]);
+    return output && output.trim() ? output.trim() : null;
+  } catch {
+    // File doesn't exist at this ref or other error
+    return null;
+  }
+}
+
+/**
+ * Deep equality check for objects (sufficient for dependency trees)
+ * @param {any} a - First object to compare
+ * @param {any} b - Second object to compare
+ * @param {WeakSet} [visited] - Set to track visited object pairs to prevent infinite recursion
+ * @returns {boolean} True if objects are deeply equal
+ */
+function deepEqual(a, b, visited = new WeakSet()) {
+  if (a === b) return true;
+  if (typeof a !== typeof b) return false;
+  if (typeof a !== 'object' || a === null || b === null) return false;
+
+  // Prevent infinite recursion by tracking visited object pairs
+  if (visited.has(a) || visited.has(b)) return a === b;
+  visited.add(a);
+  visited.add(b);
+
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+
+  for (const key of aKeys) {
+    if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
+    if (!deepEqual(a[key], b[key], visited)) return false;
+  }
+  return true;
+}
+
+/**
+ * Check if package files have actual dependency changes (not just metadata changes)
+ * This covers both package.json and package-lock.json files
+ */
+export async function hasPackageDependencyChanges() {
+  try {
     const context = github.context;
     if (context.eventName !== 'pull_request') {
       return false;
@@ -281,26 +367,78 @@ export async function hasPackageJsonDependencyChanges() {
     const sanitizedBaseRef = sanitizeSHA(baseRef, 'baseRef');
     const sanitizedHeadRef = sanitizeSHA(headRef, 'headRef');
 
-    // Get the diff for package.json only
-    const diffOutput = await execGit(['diff', sanitizedBaseRef, sanitizedHeadRef, '--', 'package.json']);
+    // Check package.json for production dependency changes using proper JSON parsing
+    const basePackageJsonRaw = await getFileAtRef(PACKAGE_JSON_FILENAME, sanitizedBaseRef);
+    const headPackageJsonRaw = await getFileAtRef(PACKAGE_JSON_FILENAME, sanitizedHeadRef);
 
-    if (!diffOutput) {
-      return false; // No changes to package.json
+    if (basePackageJsonRaw && headPackageJsonRaw) {
+      try {
+        const basePackageJson = JSON.parse(basePackageJsonRaw);
+        const headPackageJson = JSON.parse(headPackageJsonRaw);
+
+        // Compare dependency sections based on configuration
+        const includeDevDependencies = core.getBooleanInput('include-dev-dependencies');
+        const dependencySections = [
+          'dependencies',
+          'peerDependencies',
+          'optionalDependencies',
+          'bundleDependencies',
+          'bundledDependencies'
+        ];
+
+        // Add devDependencies to check list if configured to include them
+        if (includeDevDependencies) {
+          dependencySections.push('devDependencies');
+        }
+
+        for (const section of dependencySections) {
+          if (!deepEqual(basePackageJson[section], headPackageJson[section])) {
+            return true;
+          }
+        }
+      } catch (error) {
+        // If JSON parsing fails, conservatively assume a change
+        logMessage(`Warning: Could not parse package.json for comparison: ${error.message}`, 'warning');
+        return true;
+      }
+    } else if (basePackageJsonRaw !== headPackageJsonRaw) {
+      // One exists and the other doesn't
+      return true;
     }
 
-    // Check if the diff contains dependency-related changes
-    const dependencySections = [
-      '"dependencies"',
-      '"peerDependencies"',
-      '"optionalDependencies"',
-      '"bundleDependencies"',
-      '"bundledDependencies"'
-    ];
+    // Check package-lock.json for actual dependency changes using proper JSON parsing
+    const basePackageLockRaw = await getFileAtRef(PACKAGE_LOCK_JSON_FILENAME, sanitizedBaseRef);
+    const headPackageLockRaw = await getFileAtRef(PACKAGE_LOCK_JSON_FILENAME, sanitizedHeadRef);
 
-    return dependencySections.some(section => diffOutput.includes(section));
+    if (basePackageLockRaw && headPackageLockRaw) {
+      try {
+        const baseLock = JSON.parse(basePackageLockRaw);
+        const headLock = JSON.parse(headPackageLockRaw);
+
+        // Compare the dependencies object (this contains the actual dependency tree)
+        // This excludes metadata like version, name, lockfileVersion
+        if (!deepEqual(baseLock.dependencies, headLock.dependencies)) {
+          return true;
+        }
+
+        // Also check the packages object (npm v7+ lockfile format)
+        if (!deepEqual(baseLock.packages, headLock.packages)) {
+          return true;
+        }
+      } catch (error) {
+        // If JSON parsing fails, conservatively assume a change
+        logMessage(`Warning: Could not parse package-lock.json for comparison: ${error.message}`, 'warning');
+        return true;
+      }
+    } else if (basePackageLockRaw !== headPackageLockRaw) {
+      // One exists and the other doesn't
+      return true;
+    }
+
+    return false;
   } catch (error) {
     // If we can't determine dependency changes, err on the side of caution
-    logMessage(`Warning: Could not check package.json dependency changes: ${error.message}`, 'warning');
+    logMessage(`Warning: Could not check package dependency changes: ${error.message}`, 'warning');
     return true;
   }
 }
@@ -462,12 +600,12 @@ export async function run() {
       // Check for regular relevant file changes (JS/TS files, package-lock.json)
       const hasRegularChanges = hasRelevantFileChanges(changedFiles);
 
-      // Check specifically for package.json dependency changes
-      const hasPackageDepChanges = await hasPackageJsonDependencyChanges();
+      // Check specifically for package dependency changes (package.json and package-lock.json)
+      const hasPackageDepChanges = await hasPackageDependencyChanges();
 
       if (!hasRegularChanges && !hasPackageDepChanges) {
         logMessage(
-          '⏭️  No JavaScript/TypeScript files or package dependency changes detected, skipping version check',
+          '⏭️  No JavaScript/TypeScript files or dependency changes detected, skipping version check',
           'warning'
         );
         return;
@@ -477,7 +615,7 @@ export async function run() {
         logMessage('✅ Package dependency changes detected, proceeding with version check...');
       }
       if (hasRegularChanges) {
-        logMessage('✅ JavaScript/TypeScript or package-lock.json changes detected, proceeding with version check...');
+        logMessage('✅ JavaScript/TypeScript file changes detected, proceeding with version check...');
         const relevantFiles = changedFiles.filter(file => isRelevantFile(file));
         logMessage(`Changed files: ${relevantFiles.join(', ')}`);
       }

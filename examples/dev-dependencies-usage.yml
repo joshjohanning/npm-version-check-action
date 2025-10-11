@@ -1,0 +1,72 @@
+# Example showing how to configure devDependencies checking
+
+name: Version Check with DevDependencies
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Default behavior - devDependencies changes don't require version bump
+  standard-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Check version (default - ignores devDependencies)
+        uses: joshjohanning/npm-version-check-action@v1
+        with:
+          package-path: 'package.json'
+          tag-prefix: 'v'
+          # include-dev-dependencies: false  # This is the default
+
+  # Alternative - require version bump for devDependencies changes
+  strict-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Check version (strict - includes devDependencies)
+        uses: joshjohanning/npm-version-check-action@v1
+        with:
+          package-path: 'package.json'
+          tag-prefix: 'v'
+          include-dev-dependencies: true # Require version bump for devDependency changes
+
+  # Conditional behavior - only check devDependencies for certain packages
+  conditional-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      # For library packages, devDependencies might affect build output
+      - name: Check library version (include devDependencies)
+        if: contains(github.event.pull_request.changed_files, 'packages/lib/')
+        uses: joshjohanning/npm-version-check-action@v1
+        with:
+          package-path: 'packages/lib/package.json'
+          tag-prefix: 'lib-v'
+          include-dev-dependencies: true
+
+      # For application packages, devDependencies typically don't affect runtime
+      - name: Check app version (ignore devDependencies)
+        if: contains(github.event.pull_request.changed_files, 'packages/app/')
+        uses: joshjohanning/npm-version-check-action@v1
+        with:
+          package-path: 'packages/app/package.json'
+          tag-prefix: 'app-v'
+          include-dev-dependencies: false
