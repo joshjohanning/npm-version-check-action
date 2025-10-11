@@ -158,9 +158,9 @@ The action intelligently handles different types of file changes:
 - `package.json` - Only triggers version check for **dependency changes**, not metadata
   - ✅ **Triggers check**: Changes to `dependencies`, `peerDependencies`, `optionalDependencies`, `bundleDependencies`
   - ❌ **Skips check**: Changes to `version`, `description`, `scripts`, `devDependencies`, `author`, etc.
-- `package-lock.json` - Only triggers version check for **actual dependency changes**
-  - ✅ **Triggers check**: New packages, changed package URLs/integrity, dependency tree changes
-  - ❌ **Skips check**: Version metadata updates, lockfile format changes
+- `package-lock.json` - Only triggers version check for **production dependency changes**
+  - ✅ **Triggers check**: New packages, changed package URLs/integrity, production dependency tree changes
+  - ❌ **Skips check**: Version metadata updates, lockfile format changes, devDependency changes
 
 This intelligent approach prevents unnecessary version bumps when only non-functional changes are made.
 
