@@ -1,4 +1,4 @@
-name: 'NPM Version Check'
+name: 'npm-version-check-action'
 description: 'GitHub Action that validates npm package version increments in pull requests to ensure proper semantic versioning'
 author: 'Josh Johanning'
 branding:
