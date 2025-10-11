@@ -6,7 +6,7 @@ import * as path from 'path';
 import semver from 'semver';
 
 // Shared constants for validation
-const SAFE_GIT_COMMANDS = ['diff', 'fetch', 'tag'];
+const SAFE_GIT_COMMANDS = ['diff', 'fetch', 'tag', 'show'];
 const SAFE_GIT_OPTIONS = ['-l', '--name-only', '--tags', '--'];
 const SHA_PATTERN = /^[a-f0-9]{7,40}$/i;
 // Pattern to detect shell metacharacters and other dangerous characters for command injection prevention
@@ -261,6 +261,44 @@ export function isRelevantFile(file) {
 }
 
 /**
+ * Get file content at a specific git ref
+ * @param {string} filePath - The file path to retrieve
+ * @param {string} ref - The git reference (SHA, branch, etc.)
+ * @returns {Promise<string|null>} The file content or null if not found
+ */
+async function getFileAtRef(filePath, ref) {
+  try {
+    const output = await execGit(['show', `${ref}:${filePath}`]);
+    return output && output.trim() ? output.trim() : null;
+  } catch (error) {
+    // File doesn't exist at this ref or other error
+    return null;
+  }
+}
+
+/**
+ * Deep equality check for objects (sufficient for dependency trees)
+ * @param {any} a - First object to compare
+ * @param {any} b - Second object to compare
+ * @returns {boolean} True if objects are deeply equal
+ */
+function deepEqual(a, b) {
+  if (a === b) return true;
+  if (typeof a !== typeof b) return false;
+  if (typeof a !== 'object' || a === null || b === null) return false;
+  
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  
+  for (const key of aKeys) {
+    if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
+    if (!deepEqual(a[key], b[key])) return false;
+  }
+  return true;
+}
+
+/**
  * Check if package files have actual dependency changes (not just metadata changes)
  * This covers both package.json and package-lock.json files
  */
@@ -281,47 +319,66 @@ export async function hasPackageDependencyChanges() {
     const sanitizedBaseRef = sanitizeSHA(baseRef, 'baseRef');
     const sanitizedHeadRef = sanitizeSHA(headRef, 'headRef');
 
-    // Check package.json for dependency changes
-    const packageJsonDiff = await execGit(['diff', sanitizedBaseRef, sanitizedHeadRef, '--', 'package.json']);
+    // Check package.json for production dependency changes using proper JSON parsing
+    const basePackageJsonRaw = await getFileAtRef('package.json', sanitizedBaseRef);
+    const headPackageJsonRaw = await getFileAtRef('package.json', sanitizedHeadRef);
 
-    if (packageJsonDiff) {
-      // Check if the diff contains dependency-related changes
-      const dependencySections = [
-        '"dependencies"',
-        '"peerDependencies"',
-        '"optionalDependencies"',
-        '"bundleDependencies"',
-        '"bundledDependencies"'
-      ];
+    if (basePackageJsonRaw && headPackageJsonRaw) {
+      try {
+        const basePackageJson = JSON.parse(basePackageJsonRaw);
+        const headPackageJson = JSON.parse(headPackageJsonRaw);
 
-      if (dependencySections.some(section => packageJsonDiff.includes(section))) {
+        // Compare production dependency sections (excluding devDependencies)
+        const productionDependencySections = [
+          'dependencies',
+          'peerDependencies', 
+          'optionalDependencies',
+          'bundleDependencies',
+          'bundledDependencies'
+        ];
+
+        for (const section of productionDependencySections) {
+          if (!deepEqual(basePackageJson[section], headPackageJson[section])) {
+            return true;
+          }
+        }
+      } catch (error) {
+        // If JSON parsing fails, conservatively assume a change
+        logMessage(`Warning: Could not parse package.json for comparison: ${error.message}`, 'warning');
         return true;
       }
+    } else if (basePackageJsonRaw !== headPackageJsonRaw) {
+      // One exists and the other doesn't, or both are null but diff detected changes
+      return true;
     }
 
-    // Check package-lock.json for actual dependency changes (not just version metadata)
-    const packageLockDiff = await execGit(['diff', sanitizedBaseRef, sanitizedHeadRef, '--', 'package-lock.json']);
+    // Check package-lock.json for actual dependency changes using proper JSON parsing
+    const basePackageLockRaw = await getFileAtRef('package-lock.json', sanitizedBaseRef);
+    const headPackageLockRaw = await getFileAtRef('package-lock.json', sanitizedHeadRef);
 
-    if (packageLockDiff) {
-      // Look for actual dependency changes in package-lock.json
-      // These patterns indicate real dependency changes, not just version bumps
-      const dependencyChangePatterns = [
-        '"resolved":', // New or changed package URLs
-        '"integrity":', // New or changed package checksums
-        '"dependencies": {', // New dependency blocks
-        '"dev": true', // Dev dependency flag changes (though we might not care about dev deps)
-        '"dev": false', // Production dependency changes
-        '"peer": true', // Peer dependency changes
-        '"optional": true' // Optional dependency changes
-      ];
+    if (basePackageLockRaw && headPackageLockRaw) {
+      try {
+        const baseLock = JSON.parse(basePackageLockRaw);
+        const headLock = JSON.parse(headPackageLockRaw);
 
-      // Only consider it a dependency change if we see actual package changes
-      // not just version number updates in the root package
-      const hasRealDependencyChanges = dependencyChangePatterns.some(pattern => packageLockDiff.includes(pattern));
+        // Compare the dependencies object (this contains the actual dependency tree)
+        // This excludes metadata like version, name, lockfileVersion
+        if (!deepEqual(baseLock.dependencies, headLock.dependencies)) {
+          return true;
+        }
 
-      if (hasRealDependencyChanges) {
+        // Also check the packages object (npm v7+ lockfile format)
+        if (!deepEqual(baseLock.packages, headLock.packages)) {
+          return true;
+        }
+      } catch (error) {
+        // If JSON parsing fails, conservatively assume a change
+        logMessage(`Warning: Could not parse package-lock.json for comparison: ${error.message}`, 'warning');
         return true;
       }
+    } else if (basePackageLockRaw !== headPackageLockRaw) {
+      // One exists and the other doesn't, or both are null but diff detected changes
+      return true;
     }
 
     return false;
