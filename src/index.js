@@ -7,7 +7,7 @@ import semver from 'semver';
 
 // Shared constants for validation
 const SAFE_GIT_COMMANDS = ['diff', 'fetch', 'tag'];
-const SAFE_GIT_OPTIONS = ['-l', '--name-only', '--tags'];
+const SAFE_GIT_OPTIONS = ['-l', '--name-only', '--tags', '--'];
 const SHA_PATTERN = /^[a-f0-9]{7,40}$/i;
 // Pattern to detect shell metacharacters and other dangerous characters for command injection prevention
 const SHELL_INJECTION_CHARS = /[;&|`$()'"<>]/;
@@ -250,13 +250,59 @@ export function isRelevantFile(file) {
     return PACKAGE_FILENAMES.includes(fileName);
   };
 
-  // Include package.json files (package.json, package-lock.json, etc.)
-  if (isPackageFile(file)) {
+  // Include package-lock.json (dependency changes reflected here)
+  // but exclude package.json since we need to check dependencies specifically
+  if (isPackageFile(file) && path.basename(file) !== 'package.json') {
     return true;
   }
 
   // At this point, include only JavaScript/TypeScript files (package files were already handled above)
   return JS_TS_EXTENSIONS.includes(fileExtension);
+}
+
+/**
+ * Check if package.json has dependency changes (not just metadata changes)
+ */
+export async function hasPackageJsonDependencyChanges() {
+  try {
+    // Get the diff for package.json specifically
+    const context = github.context;
+    if (context.eventName !== 'pull_request') {
+      return false;
+    }
+
+    const baseRef = context.payload.pull_request?.base?.sha;
+    const headRef = context.sha;
+
+    if (!baseRef || !headRef) {
+      return false;
+    }
+
+    const sanitizedBaseRef = sanitizeSHA(baseRef, 'baseRef');
+    const sanitizedHeadRef = sanitizeSHA(headRef, 'headRef');
+
+    // Get the diff for package.json only
+    const diffOutput = await execGit(['diff', sanitizedBaseRef, sanitizedHeadRef, '--', 'package.json']);
+
+    if (!diffOutput) {
+      return false; // No changes to package.json
+    }
+
+    // Check if the diff contains dependency-related changes
+    const dependencySections = [
+      '"dependencies"',
+      '"peerDependencies"',
+      '"optionalDependencies"',
+      '"bundleDependencies"',
+      '"bundledDependencies"'
+    ];
+
+    return dependencySections.some(section => diffOutput.includes(section));
+  } catch (error) {
+    // If we can't determine dependency changes, err on the side of caution
+    logMessage(`Warning: Could not check package.json dependency changes: ${error.message}`, 'warning');
+    return true;
+  }
 }
 
 /**
@@ -413,14 +459,28 @@ export async function run() {
       const changedFiles = await getChangedFiles();
       logMessage(`Files changed: ${changedFiles.join(', ')}`);
 
-      if (!hasRelevantFileChanges(changedFiles)) {
-        logMessage('⏭️  No JavaScript/TypeScript or package files changed, skipping version check', 'warning');
+      // Check for regular relevant file changes (JS/TS files, package-lock.json)
+      const hasRegularChanges = hasRelevantFileChanges(changedFiles);
+
+      // Check specifically for package.json dependency changes
+      const hasPackageDepChanges = await hasPackageJsonDependencyChanges();
+
+      if (!hasRegularChanges && !hasPackageDepChanges) {
+        logMessage(
+          '⏭️  No JavaScript/TypeScript files or package dependency changes detected, skipping version check',
+          'warning'
+        );
         return;
       }
 
-      logMessage('✅ JavaScript/TypeScript or package files changed, proceeding with version check...');
-      const relevantFiles = changedFiles.filter(file => isRelevantFile(file));
-      logMessage(`Changed files: ${relevantFiles.join(', ')}`);
+      if (hasPackageDepChanges) {
+        logMessage('✅ Package dependency changes detected, proceeding with version check...');
+      }
+      if (hasRegularChanges) {
+        logMessage('✅ JavaScript/TypeScript or package-lock.json changes detected, proceeding with version check...');
+        const relevantFiles = changedFiles.filter(file => isRelevantFile(file));
+        logMessage(`Changed files: ${relevantFiles.join(', ')}`);
+      }
     }
 
     // Read package.json
