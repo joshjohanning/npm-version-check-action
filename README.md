@@ -13,13 +13,15 @@ This action prevents developers from forgetting to bump package.json version bef
 ## ✨ Features
 
 - 🎯 **Smart file detection** - Only runs when JavaScript/TypeScript/package files are modified
+- 🧠 **Intelligent dependency checking** - Distinguishes between actual dependency changes vs metadata-only changes in package.json and package-lock.json
+- 🔧 **Configurable devDependencies handling** - Choose whether devDependency changes should trigger version bumps
 - 📊 **Semantic versioning validation** - Ensures new version is higher than previous release
 - 🏷️ **Git tag comparison** - Compares against the latest git tag
 - 🚀 **Shallow clone compatible** - Automatically fetches tags, works with default checkout
 - 🎉 **First release support** - Gracefully handles repositories with no previous tags
 - 🚀 **JavaScript action** - Fast execution with Node.js runtime
 - 📝 **Clear messaging** - Provides detailed success/error messages with emojis
-- ⚙️ **Configurable** - Supports custom package.json paths and tag prefixes
+- ⚙️ **Configurable** - Supports custom package.json paths, tag prefixes, and dependency policies
 
 ## 📋 Requirements
 
@@ -56,6 +58,7 @@ jobs:
     package-path: 'packages/core/package.json' # Custom package.json path
     tag-prefix: 'v' # Tag prefix (default: 'v')
     skip-files-check: 'false' # Always run, don't check files
+    include-dev-dependencies: 'true' # Require version bump for devDependencies
 ```
 
 ### Complete Workflow Example
@@ -100,11 +103,12 @@ jobs:
 
 ## 📥 Inputs
 
-| Input              | Description                                                          | Required | Default        |
-| ------------------ | -------------------------------------------------------------------- | -------- | -------------- |
-| `package-path`     | Path to package.json file (relative to repository root)              | No       | `package.json` |
-| `tag-prefix`       | Prefix for version tags (e.g., "v" for v1.0.0)                       | No       | `v`            |
-| `skip-files-check` | Skip checking if JS/package files changed (always run version check) | No       | `false`        |
+| Input                      | Description                                                           | Required | Default        |
+| -------------------------- | --------------------------------------------------------------------- | -------- | -------------- |
+| `package-path`             | Path to package.json file (relative to repository root)               | No       | `package.json` |
+| `tag-prefix`               | Prefix for version tags (e.g., "v" for v1.0.0)                        | No       | `v`            |
+| `skip-files-check`         | Skip checking if JS/package files changed (always run version check)  | No       | `false`        |
+| `include-dev-dependencies` | Whether devDependency changes should trigger version bump requirement | No       | `false`        |
 
 ## 📤 Outputs
 
@@ -130,21 +134,50 @@ jobs:
 
 ## 🎯 How It Works
 
-1. **File Change Detection**: Checks if JavaScript, TypeScript, or package files were modified in the PR
-2. **Version Extraction**: Reads the current version from `package.json`
-3. **Tag Comparison**: Fetches the latest git tag and compares versions
-4. **Semantic Validation**: Ensures the new version is higher than the previous release
-5. **Clear Feedback**: Provides success or error messages with actionable hints
+1. **Smart File Change Detection**: Analyzes which files were modified in the PR
+   - JavaScript/TypeScript files trigger version checks
+   - Package files (`package.json`, `package-lock.json`) undergo intelligent dependency analysis
+2. **Intelligent Dependency Analysis**: For package files, distinguishes between:
+   - **Functional changes**: Actual dependency additions, updates, or removals that affect functionality
+   - **Metadata changes**: Version bumps, description updates, scripts changes, or devDependency changes that don't affect runtime
+3. **Version Extraction**: Reads the current version from `package.json`
+4. **Tag Comparison**: Fetches the latest git tag and compares versions
+5. **Semantic Validation**: Ensures the new version is higher than the previous release
+6. **Clear Feedback**: Provides success or error messages with actionable hints
 
-### Supported File Extensions
+### Smart File Detection
 
-The action checks for changes in files with these extensions:
+The action intelligently handles different types of file changes:
+
+#### JavaScript/TypeScript Files (Always Trigger Version Check)
 
 - `.js` - JavaScript files
 - `.ts` - TypeScript files
 - `.jsx` - React JavaScript files
 - `.tsx` - React TypeScript files
-- `package*.json` - Package configuration files
+
+#### Package Files (Smart Dependency Analysis)
+
+- `package.json` - Only triggers version check for **dependency changes**, not metadata
+  - ✅ **Triggers check**: Changes to `dependencies`, `peerDependencies`, `optionalDependencies`, `bundleDependencies`
+  - ✅ **Triggers check (configurable)**: Changes to `devDependencies` when `include-dev-dependencies: true`
+  - ❌ **Skips check**: Changes to `version`, `description`, `scripts`, `author`, etc.
+- `package-lock.json` - **Smart handling based on devDependencies configuration**
+  - ✅ **Always triggers check**: Production dependency changes (new packages, version updates, integrity changes)
+  - 🔄 **Configurable behavior**: When only devDependencies changed in package.json:
+    - ❌ **Skips check** if `include-dev-dependencies: false` (default) - package-lock.json changes are ignored
+    - ✅ **Triggers check** if `include-dev-dependencies: true` - package-lock.json changes are analyzed
+  - ❌ **Skips check**: Pure metadata changes (version bumps, format updates)
+
+#### 🎯 Key Improvement: Simplified DevDependency Logic
+
+When `include-dev-dependencies: false` (default) and only devDependencies change in package.json:
+
+- The action **completely skips** package-lock.json analysis
+- This prevents false positives where massive lock file changes from dev dependency updates incorrectly trigger version bump requirements
+- Much simpler and more reliable than trying to filter dev dependencies from complex lock file structures
+
+This intelligent approach prevents unnecessary version bumps when only non-functional changes are made.
 
 ## 📋 Version Increment Examples
 
@@ -192,6 +225,45 @@ To always validate version regardless of changed files:
     skip-files-check: 'true'
 ```
 
+### DevDependencies Configuration
+
+By default, `devDependencies` changes don't trigger version bump requirements since they typically don't affect production functionality. The action uses **smart logic** to handle this configuration:
+
+#### Default Behavior (Ignore DevDependencies) - Recommended
+
+```yaml
+- uses: joshjohanning/npm-version-check-action@v1
+  with:
+    include-dev-dependencies: 'false' # Default - devDeps don't require version bump
+```
+
+**What happens with this setting:**
+
+- 🎯 **package.json**: Only production dependencies (`dependencies`, `peerDependencies`, etc.) trigger version checks
+- 🚫 **package-lock.json**: When only devDependencies changed in package.json, lock file changes are **completely ignored**
+- ✅ **Result**: No false positives from massive lock file changes due to dev dependency updates
+
+#### Strict Mode (Include DevDependencies)
+
+For libraries where build tools/devDependencies can affect the published package:
+
+```yaml
+- uses: joshjohanning/npm-version-check-action@v1
+  with:
+    include-dev-dependencies: 'true' # devDeps changes require version bump
+```
+
+**What happens with this setting:**
+
+- ✅ **package.json**: Both production AND development dependencies trigger version checks
+- ✅ **package-lock.json**: All dependency changes are analyzed, including dev dependency effects
+
+#### Use Cases for Including DevDependencies
+
+- **Library packages**: Where build tools, bundlers, or transpilers can affect the final output
+- **Strict versioning policies**: Teams that want every dependency change tracked
+- **CI/CD sensitive packages**: Where test runners or build scripts changes impact deliverables
+
 ## 🔍 Troubleshooting
 
 ### "No previous version tag found"
@@ -212,6 +284,23 @@ Ensure your `package.json` has a valid `version` field:
 ### "Warning: Could not fetch git tags"
 
 The action automatically fetches git tags to work with shallow clones. If this warning appears, it means there was an issue fetching tags, but the action will continue with limited functionality. This is rare and usually indicates network or permission issues.
+
+### "Version check passed but I expected it to fail"
+
+If you made changes to `devDependencies` and expected a version bump requirement:
+
+1. **Check the default behavior**: By default, `devDependencies` changes don't require version bumps
+2. **Configure if needed**: Set `include-dev-dependencies: 'true'` to require version bumps for devDependency changes
+3. **Review smart detection**: The action distinguishes between functional dependency changes and metadata-only changes
+
+### "I updated devDependencies and package-lock.json changed massively, but no version bump required?"
+
+This is the **expected behavior** with the default configuration! 🎉
+
+- ✅ **Working as designed**: When `include-dev-dependencies: false` (default), massive package-lock.json changes from dev dependency updates are intentionally ignored
+- 🚫 **No false positives**: The action completely skips package-lock.json analysis when only devDependencies changed
+- 🎯 **Smart logic**: This prevents the _"I'm only updating devDependencies :("_ problem
+- ⚙️ **Configurable**: Set `include-dev-dependencies: true` if you want dev dependency changes to require version bumps
 
 ## 📝 License
 

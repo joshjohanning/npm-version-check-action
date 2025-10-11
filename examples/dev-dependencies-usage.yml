@@ -1,0 +1,100 @@
+# Example showing devDependencies configuration options
+# Demonstrates the improved smart logic for handling dev dependency changes
+#
+# 🎯 KEY IMPROVEMENT: When include-dev-dependencies: false (default), the action now
+#    completely SKIPS package-lock.json analysis when only devDependencies change.
+#    This prevents false positives from massive lock file changes due to dev dependency updates.
+#
+# 📋 Use Cases:
+#   - Default (false): Best for applications where dev tools don't affect runtime
+#   - Strict (true): Best for libraries where build tools affect the published package
+
+name: Version Check with DevDependencies
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Default behavior - devDependencies changes don't require version bump
+  # 🎯 Smart behavior: package-lock.json changes are IGNORED when only devDeps change
+  standard-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Check version (default - ignores devDependencies)
+        uses: joshjohanning/npm-version-check-action@v1
+        with:
+          package-path: 'package.json'
+          tag-prefix: 'v'
+          # include-dev-dependencies: false  # This is the default
+          # Result: No version bump required for "I'm only updating devDependencies" scenarios
+
+  # Alternative - require version bump for devDependencies changes
+  # 🔧 Strict mode: Both package.json AND package-lock.json devDep changes trigger checks
+  strict-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Check version (strict - includes devDependencies)
+        uses: joshjohanning/npm-version-check-action@v1
+        with:
+          package-path: 'package.json'
+          tag-prefix: 'v'
+          include-dev-dependencies: true # ALL dependency changes require version bump
+          # Result: Version bump required for ANY dependency change (dev or production)
+
+  # Conditional behavior - different policies for different package types
+  # 📦 Demonstrates smart usage patterns for monorepos
+  conditional-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      # For library packages, devDependencies might affect build output
+      # Build tools, transpilers, bundlers can change the published package
+      - name: Check library version (include devDependencies)
+        if: contains(github.event.pull_request.changed_files, 'packages/lib/')
+        uses: joshjohanning/npm-version-check-action@v1
+        with:
+          package-path: 'packages/lib/package.json'
+          tag-prefix: 'lib-v'
+          include-dev-dependencies: true
+          # Result: Strict checking - any dependency change requires version bump
+
+      # For application packages, devDependencies typically don't affect runtime
+      # Test runners, linters, dev servers don't change the deployed application
+      - name: Check app version (ignore devDependencies)
+        if: contains(github.event.pull_request.changed_files, 'packages/app/')
+        uses: joshjohanning/npm-version-check-action@v1
+        with:
+          package-path: 'packages/app/package.json'
+          tag-prefix: 'app-v'
+          include-dev-dependencies: false
+          # Result: Relaxed checking - only production deps require version bump
+
+      # Example: Documentation site that uses build tools
+      - name: Check docs version (include devDependencies for build tools)
+        if: contains(github.event.pull_request.changed_files, 'packages/docs/')
+        uses: joshjohanning/npm-version-check-action@v1
+        with:
+          package-path: 'packages/docs/package.json'
+          tag-prefix: 'docs-v'
+          include-dev-dependencies: true
+          # Result: Static site generators, theme updates, etc. affect output
