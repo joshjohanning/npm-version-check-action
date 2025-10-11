@@ -1094,6 +1094,136 @@ describe('hasPackageDependencyChanges', () => {
     const result = await hasPackageDependencyChanges();
     expect(result).toBe(true);
   });
+
+  test('should ignore package-lock.json changes when only devDependencies changed in package.json (your original scenario)', async () => {
+    const { hasPackageDependencyChanges } = indexModule;
+
+    // Base package.json with devDependencies
+    const basePackageJson = {
+      name: 'my-awesome-project',
+      version: '1.0.0',
+      dependencies: {
+        express: '^4.18.0',
+        lodash: '^4.17.21'
+      },
+      devDependencies: {
+        jest: '^29.0.0',
+        eslint: '^8.20.0'
+      }
+    };
+
+    // Head package.json - ONLY devDependencies changed (your scenario: "I'm only updating devDependencies :(")
+    const headPackageJson = {
+      name: 'my-awesome-project',
+      version: '1.0.0',
+      dependencies: {
+        express: '^4.18.0', // Same
+        lodash: '^4.17.21' // Same
+      },
+      devDependencies: {
+        jest: '^29.7.0', // Updated
+        eslint: '^8.50.0', // Updated
+        prettier: '^3.0.0' // Added new dev dependency
+      }
+    };
+
+    // Base package-lock.json
+    const basePackageLock = {
+      name: 'my-awesome-project',
+      version: '1.0.0',
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        '': {
+          name: 'my-awesome-project',
+          version: '1.0.0',
+          dependencies: {
+            express: '^4.18.0',
+            lodash: '^4.17.21'
+          },
+          devDependencies: {
+            jest: '^29.0.0',
+            eslint: '^8.20.0'
+          }
+        },
+        'node_modules/express': {
+          version: '4.18.0',
+          resolved: 'https://registry.npmjs.org/express/-/express-4.18.0.tgz'
+        },
+        'node_modules/jest': {
+          version: '29.0.0',
+          resolved: 'https://registry.npmjs.org/jest/-/jest-29.0.0.tgz',
+          dev: true
+        }
+      }
+    };
+
+    // Head package-lock.json - SIGNIFICANTLY different due to dev dependency updates
+    const headPackageLock = {
+      name: 'my-awesome-project',
+      version: '1.0.0',
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        '': {
+          name: 'my-awesome-project',
+          version: '1.0.0',
+          dependencies: {
+            express: '^4.18.0',
+            lodash: '^4.17.21'
+          },
+          devDependencies: {
+            jest: '^29.7.0', // Updated
+            eslint: '^8.50.0', // Updated
+            prettier: '^3.0.0' // New
+          }
+        },
+        'node_modules/express': {
+          version: '4.18.0',
+          resolved: 'https://registry.npmjs.org/express/-/express-4.18.0.tgz'
+        },
+        'node_modules/jest': {
+          version: '29.7.0', // Different version
+          resolved: 'https://registry.npmjs.org/jest/-/jest-29.7.0.tgz',
+          dev: true
+        },
+        'node_modules/prettier': {
+          // New dev dependency
+          version: '3.0.0',
+          resolved: 'https://registry.npmjs.org/prettier/-/prettier-3.0.0.tgz',
+          dev: true
+        },
+        'node_modules/eslint': {
+          // New in lock file
+          version: '8.50.0',
+          resolved: 'https://registry.npmjs.org/eslint/-/eslint-8.50.0.tgz',
+          dev: true
+        }
+      }
+    };
+
+    // Ensure include-dev-dependencies is false (your configuration)
+    mockCore.getBooleanInput.mockImplementation(input => {
+      if (input === 'include-dev-dependencies') return false;
+      return false;
+    });
+
+    mockExec.exec.mockImplementation(
+      createExecMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock)
+    );
+
+    const result = await hasPackageDependencyChanges();
+
+    // This should return FALSE - no version bump required!
+    // Even though package-lock.json has significant changes, we're ignoring them
+    // because only devDependencies changed and include-dev-dependencies is false
+    expect(result).toBe(false);
+
+    // Verify the debug logging shows our simplified logic working
+    expect(mockCore.debug).toHaveBeenCalledWith(
+      'Debug: Only devDependencies changed and include-dev-dependencies is false, ignoring lock file changes'
+    );
+  });
 });
 
 describe('npm Version Check Action - Integration Tests', () => {
