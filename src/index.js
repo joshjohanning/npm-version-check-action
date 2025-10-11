@@ -34,7 +34,9 @@ const EXCLUDED_DIRECTORIES = [
 ];
 const EXCLUDED_FILE_PATTERNS = ['.test.', '.spec.', '.config.'];
 const EXCLUDED_FILE_START_PATTERNS = ['test.', 'spec.'];
-const PACKAGE_FILENAMES = ['package.json', 'package-lock.json'];
+const PACKAGE_JSON_FILENAME = 'package.json';
+const PACKAGE_LOCK_JSON_FILENAME = 'package-lock.json';
+const PACKAGE_FILENAMES = [PACKAGE_JSON_FILENAME, PACKAGE_LOCK_JSON_FILENAME];
 
 /**
  * Log a message using GitHub Actions core logging
@@ -320,8 +322,8 @@ export async function hasPackageDependencyChanges() {
     const sanitizedHeadRef = sanitizeSHA(headRef, 'headRef');
 
     // Check package.json for production dependency changes using proper JSON parsing
-    const basePackageJsonRaw = await getFileAtRef('package.json', sanitizedBaseRef);
-    const headPackageJsonRaw = await getFileAtRef('package.json', sanitizedHeadRef);
+    const basePackageJsonRaw = await getFileAtRef(PACKAGE_JSON_FILENAME, sanitizedBaseRef);
+    const headPackageJsonRaw = await getFileAtRef(PACKAGE_JSON_FILENAME, sanitizedHeadRef);
 
     if (basePackageJsonRaw && headPackageJsonRaw) {
       try {
@@ -359,8 +361,8 @@ export async function hasPackageDependencyChanges() {
     }
 
     // Check package-lock.json for actual dependency changes using proper JSON parsing
-    const basePackageLockRaw = await getFileAtRef('package-lock.json', sanitizedBaseRef);
-    const headPackageLockRaw = await getFileAtRef('package-lock.json', sanitizedHeadRef);
+    const basePackageLockRaw = await getFileAtRef(PACKAGE_LOCK_JSON_FILENAME, sanitizedBaseRef);
+    const headPackageLockRaw = await getFileAtRef(PACKAGE_LOCK_JSON_FILENAME, sanitizedHeadRef);
 
     if (basePackageLockRaw && headPackageLockRaw) {
       try {
