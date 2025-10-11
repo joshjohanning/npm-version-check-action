@@ -4,6 +4,10 @@
 
 import { jest } from '@jest/globals';
 
+// Test constants for consistent SHA values
+const TEST_HEAD_SHA = 'abc1234';
+const TEST_BASE_SHA = 'def4567';
+
 // Mock process.exit to prevent tests from exiting
 jest.spyOn(process, 'exit').mockImplementation(() => {});
 
@@ -29,11 +33,11 @@ const mockExec = {
 const mockGithub = {
   context: {
     eventName: 'pull_request',
-    sha: 'abc1234',
+    sha: TEST_HEAD_SHA,
     payload: {
       pull_request: {
         base: {
-          sha: 'def4567'
+          sha: TEST_BASE_SHA
         }
       }
     }
@@ -73,19 +77,19 @@ function createExecMock(basePackageJson, headPackageJson, basePackageLock, headP
       output = '';
     }
     // Handle package.json file retrieval
-    else if (args.includes('show') && args.includes('def4567:package.json')) {
+    else if (args.includes('show') && args.includes(`${TEST_BASE_SHA}:package.json`)) {
       output = basePackageJson ? JSON.stringify(basePackageJson) : '';
-    } else if (args.includes('show') && args.includes('abc1234:package.json')) {
+    } else if (args.includes('show') && args.includes(`${TEST_HEAD_SHA}:package.json`)) {
       output = headPackageJson ? JSON.stringify(headPackageJson) : '';
     }
     // Handle package-lock.json file retrieval
-    else if (args.includes('show') && args.includes('def4567:package-lock.json')) {
+    else if (args.includes('show') && args.includes(`${TEST_BASE_SHA}:package-lock.json`)) {
       if (basePackageLock) {
         output = JSON.stringify(basePackageLock);
       } else {
         throw new Error('File not found');
       }
-    } else if (args.includes('show') && args.includes('abc1234:package-lock.json')) {
+    } else if (args.includes('show') && args.includes(`${TEST_HEAD_SHA}:package-lock.json`)) {
       if (headPackageLock) {
         output = JSON.stringify(headPackageLock);
       } else {
@@ -402,10 +406,10 @@ describe('hasPackageDependencyChanges', () => {
   beforeEach(() => {
     // Reset to default PR context
     mockGithub.context.eventName = 'pull_request';
-    mockGithub.context.sha = 'abc1234';
+    mockGithub.context.sha = TEST_HEAD_SHA;
     mockGithub.context.payload = {
       pull_request: {
-        base: { sha: 'def4567' }
+        base: { sha: TEST_BASE_SHA }
       }
     };
 
@@ -445,7 +449,10 @@ describe('hasPackageDependencyChanges', () => {
     };
 
     mockExec.exec.mockImplementation(async (command, args, _options) => {
-      if (args.includes('show') && (args.includes('def4567:package.json') || args.includes('abc1234:package.json'))) {
+      if (
+        args.includes('show') &&
+        (args.includes(`${TEST_BASE_SHA}:package.json`) || args.includes(`${TEST_HEAD_SHA}:package.json`))
+      ) {
         return JSON.stringify(samePackageJson);
       }
       return '';
@@ -487,9 +494,9 @@ describe('hasPackageDependencyChanges', () => {
         output = '';
       }
       // Handle package.json file retrieval
-      else if (args.includes('show') && args.includes('def4567:package.json')) {
+      else if (args.includes('show') && args.includes(`${TEST_BASE_SHA}:package.json`)) {
         output = JSON.stringify(basePackageJson);
-      } else if (args.includes('show') && args.includes('abc1234:package.json')) {
+      } else if (args.includes('show') && args.includes(`${TEST_HEAD_SHA}:package.json`)) {
         output = JSON.stringify(headPackageJson);
       }
       // Handle package-lock.json (return error to indicate no file)
@@ -764,7 +771,7 @@ describe('hasPackageDependencyChanges', () => {
     // Simulate a critical error that happens before getFileAtRef is called,
     // such as during SHA sanitization or context setup
     mockGithub.context.eventName = 'pull_request';
-    mockGithub.context.sha = 'abc1234';
+    mockGithub.context.sha = TEST_HEAD_SHA;
     mockGithub.context.payload = {
       pull_request: {
         base: { sha: 'invalid;injection' } // This should trigger sanitizeSHA error
@@ -794,8 +801,8 @@ describe('hasPackageDependencyChanges', () => {
 
     await hasPackageDependencyChanges();
     // Verify that the git show commands are called with sanitized SHA values
-    expect(mockExec.exec).toHaveBeenCalledWith('git', ['show', 'def4567:package.json'], expect.any(Object));
-    expect(mockExec.exec).toHaveBeenCalledWith('git', ['show', 'abc1234:package.json'], expect.any(Object));
+    expect(mockExec.exec).toHaveBeenCalledWith('git', ['show', `${TEST_BASE_SHA}:package.json`], expect.any(Object));
+    expect(mockExec.exec).toHaveBeenCalledWith('git', ['show', `${TEST_HEAD_SHA}:package.json`], expect.any(Object));
   });
 
   test('should handle complex dependency diffs with multiple sections', async () => {
@@ -1006,10 +1013,10 @@ describe('npm Version Check Action - Integration Tests', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockGithub.context.eventName = 'pull_request';
-    mockGithub.context.sha = 'abc1234';
+    mockGithub.context.sha = TEST_HEAD_SHA;
     mockGithub.context.payload = {
       pull_request: {
-        base: { sha: 'def4567' }
+        base: { sha: TEST_BASE_SHA }
       }
     };
   });
@@ -1027,11 +1034,11 @@ describe('npm Version Check Action - Integration Tests', () => {
         return 0;
       });
 
-      const result = await execGit(['diff', '--name-only', 'abc1234', 'def4567']);
+      const result = await execGit(['diff', '--name-only', TEST_HEAD_SHA, TEST_BASE_SHA]);
       expect(result).toBe('git output');
       expect(mockExec.exec).toHaveBeenCalledWith(
         'git',
-        ['diff', '--name-only', 'abc1234', 'def4567'],
+        ['diff', '--name-only', TEST_HEAD_SHA, TEST_BASE_SHA],
         expect.objectContaining({
           listeners: expect.any(Object),
           silent: true
@@ -1049,7 +1056,7 @@ describe('npm Version Check Action - Integration Tests', () => {
         throw new Error('Command failed');
       });
 
-      await expect(execGit(['diff', '--name-only', 'abc1234', 'def4567'])).rejects.toThrow(
+      await expect(execGit(['diff', '--name-only', TEST_HEAD_SHA, TEST_BASE_SHA])).rejects.toThrow(
         'Git command failed: git error message'
       );
     });
@@ -1107,7 +1114,7 @@ describe('npm Version Check Action - Integration Tests', () => {
       const { execGit } = indexModule;
       mockExec.exec.mockResolvedValue(0);
 
-      await expect(execGit(['diff', '--name-only', 'abc1234', 'def4567'])).resolves.not.toThrow();
+      await expect(execGit(['diff', '--name-only', TEST_HEAD_SHA, TEST_BASE_SHA])).resolves.not.toThrow();
       await expect(execGit(['fetch', '--tags'])).resolves.not.toThrow();
       await expect(execGit(['tag', '-l'])).resolves.not.toThrow();
     });
@@ -1117,7 +1124,7 @@ describe('npm Version Check Action - Integration Tests', () => {
       mockExec.exec.mockResolvedValue(0);
 
       // Should not throw for the double dash separator used in hasPackageDependencyChanges
-      await expect(execGit(['diff', 'abc1234', 'def4567', '--', 'package.json'])).resolves.not.toThrow();
+      await expect(execGit(['diff', TEST_HEAD_SHA, TEST_BASE_SHA, '--', 'package.json'])).resolves.not.toThrow();
     });
   });
   describe('getChangedFiles function', () => {
@@ -1162,8 +1169,8 @@ describe('npm Version Check Action - Integration Tests', () => {
       await expect(getChangedFiles()).rejects.toThrow('Invalid baseRef format');
 
       // Reset to valid values
-      mockGithub.context.payload.pull_request.base.sha = 'def4567';
-      mockGithub.context.sha = 'abc1234';
+      mockGithub.context.payload.pull_request.base.sha = TEST_BASE_SHA;
+      mockGithub.context.sha = TEST_HEAD_SHA;
     });
   });
   describe('getLatestVersionTag function', () => {
@@ -1322,9 +1329,9 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       // Mock execGit to return invalid JSON for package.json
       mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('show') && args[1] === 'def4567:package.json') {
+        if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:package.json`) {
           options.listeners.stdout('{ invalid json }');
-        } else if (args.includes('show') && args[1] === 'abc1234:package.json') {
+        } else if (args.includes('show') && args[1] === `${TEST_HEAD_SHA}:package.json`) {
           options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
         }
         return 0;
@@ -1341,9 +1348,9 @@ describe('npm Version Check Action - Integration Tests', () => {
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args.includes('show') && args[1].includes('package.json')) {
           options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
-        } else if (args.includes('show') && args[1] === 'def4567:package-lock.json') {
+        } else if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:package-lock.json`) {
           options.listeners.stdout('{ invalid lock json }');
-        } else if (args.includes('show') && args[1] === 'abc1234:package-lock.json') {
+        } else if (args.includes('show') && args[1] === `${TEST_HEAD_SHA}:package-lock.json`) {
           options.listeners.stdout('{ "name": "test", "version": "1.0.0", "dependencies": {} }');
         }
         return 0;
@@ -1393,9 +1400,9 @@ describe('npm Version Check Action - Integration Tests', () => {
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args.includes('diff') && args.includes('--name-only')) {
           options.listeners.stdout('package.json\nsrc/index.js');
-        } else if (args.includes('show') && args[1] === 'def4567:package.json') {
+        } else if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:package.json`) {
           options.listeners.stdout('{ "name": "test", "dependencies": { "lodash": "^4.0.0" } }');
-        } else if (args.includes('show') && args[1] === 'abc1234:package.json') {
+        } else if (args.includes('show') && args[1] === `${TEST_HEAD_SHA}:package.json`) {
           options.listeners.stdout('{ "name": "test", "dependencies": { "lodash": "^4.1.0" } }');
         } else if (args.includes('tag')) {
           options.listeners.stdout('v1.0.0');
