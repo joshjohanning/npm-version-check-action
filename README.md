@@ -162,9 +162,20 @@ The action intelligently handles different types of file changes:
   - ✅ **Triggers check**: Changes to `dependencies`, `peerDependencies`, `optionalDependencies`, `bundleDependencies`
   - ✅ **Triggers check (configurable)**: Changes to `devDependencies` when `include-dev-dependencies: true`
   - ❌ **Skips check**: Changes to `version`, `description`, `scripts`, `author`, etc.
-- `package-lock.json` - Only triggers version check for **production dependency changes**
-  - ✅ **Triggers check**: New packages, changed package URLs/integrity, production dependency tree changes
-  - ❌ **Skips check**: Version metadata updates, lockfile format changes, devDependency changes
+- `package-lock.json` - **Smart handling based on devDependencies configuration**
+  - ✅ **Always triggers check**: Production dependency changes (new packages, version updates, integrity changes)
+  - 🔄 **Configurable behavior**: When only devDependencies changed in package.json:
+    - ❌ **Skips check** if `include-dev-dependencies: false` (default) - package-lock.json changes are ignored
+    - ✅ **Triggers check** if `include-dev-dependencies: true` - package-lock.json changes are analyzed
+  - ❌ **Skips check**: Pure metadata changes (version bumps, format updates)
+
+#### 🎯 Key Improvement: Simplified DevDependency Logic
+
+When `include-dev-dependencies: false` (default) and only devDependencies change in package.json:
+
+- The action **completely skips** package-lock.json analysis
+- This prevents false positives where massive lock file changes from dev dependency updates incorrectly trigger version bump requirements
+- Much simpler and more reliable than trying to filter dev dependencies from complex lock file structures
 
 This intelligent approach prevents unnecessary version bumps when only non-functional changes are made.
 
@@ -216,15 +227,21 @@ To always validate version regardless of changed files:
 
 ### DevDependencies Configuration
 
-By default, `devDependencies` changes don't trigger version bump requirements since they typically don't affect production functionality. However, you can configure this behavior:
+By default, `devDependencies` changes don't trigger version bump requirements since they typically don't affect production functionality. The action uses **smart logic** to handle this configuration:
 
-#### Default Behavior (Ignore DevDependencies)
+#### Default Behavior (Ignore DevDependencies) - Recommended
 
 ```yaml
 - uses: joshjohanning/npm-version-check-action@v1
   with:
     include-dev-dependencies: 'false' # Default - devDeps don't require version bump
 ```
+
+**What happens with this setting:**
+
+- 🎯 **package.json**: Only production dependencies (`dependencies`, `peerDependencies`, etc.) trigger version checks
+- 🚫 **package-lock.json**: When only devDependencies changed in package.json, lock file changes are **completely ignored**
+- ✅ **Result**: No false positives from massive lock file changes due to dev dependency updates
 
 #### Strict Mode (Include DevDependencies)
 
@@ -235,6 +252,11 @@ For libraries where build tools/devDependencies can affect the published package
   with:
     include-dev-dependencies: 'true' # devDeps changes require version bump
 ```
+
+**What happens with this setting:**
+
+- ✅ **package.json**: Both production AND development dependencies trigger version checks
+- ✅ **package-lock.json**: All dependency changes are analyzed, including dev dependency effects
 
 #### Use Cases for Including DevDependencies
 
@@ -270,6 +292,15 @@ If you made changes to `devDependencies` and expected a version bump requirement
 1. **Check the default behavior**: By default, `devDependencies` changes don't require version bumps
 2. **Configure if needed**: Set `include-dev-dependencies: 'true'` to require version bumps for devDependency changes
 3. **Review smart detection**: The action distinguishes between functional dependency changes and metadata-only changes
+
+### "I updated devDependencies and package-lock.json changed massively, but no version bump required?"
+
+This is the **expected behavior** with the default configuration! 🎉
+
+- ✅ **Working as designed**: When `include-dev-dependencies: false` (default), massive package-lock.json changes from dev dependency updates are intentionally ignored
+- 🚫 **No false positives**: The action completely skips package-lock.json analysis when only devDependencies changed
+- 🎯 **Smart logic**: This prevents the _"I'm only updating devDependencies :("_ problem
+- ⚙️ **Configurable**: Set `include-dev-dependencies: true` if you want dev dependency changes to require version bumps
 
 ## 📝 License
 
