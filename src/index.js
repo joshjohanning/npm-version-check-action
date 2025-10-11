@@ -270,7 +270,7 @@ async function getFileAtRef(filePath, ref) {
   try {
     const output = await execGit(['show', `${ref}:${filePath}`]);
     return output && output.trim() ? output.trim() : null;
-  } catch (error) {
+  } catch {
     // File doesn't exist at this ref or other error
     return null;
   }
@@ -286,11 +286,11 @@ function deepEqual(a, b) {
   if (a === b) return true;
   if (typeof a !== typeof b) return false;
   if (typeof a !== 'object' || a === null || b === null) return false;
-  
+
   const aKeys = Object.keys(a);
   const bKeys = Object.keys(b);
   if (aKeys.length !== bKeys.length) return false;
-  
+
   for (const key of aKeys) {
     if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
     if (!deepEqual(a[key], b[key])) return false;
@@ -328,16 +328,22 @@ export async function hasPackageDependencyChanges() {
         const basePackageJson = JSON.parse(basePackageJsonRaw);
         const headPackageJson = JSON.parse(headPackageJsonRaw);
 
-        // Compare production dependency sections (excluding devDependencies)
-        const productionDependencySections = [
+        // Compare dependency sections based on configuration
+        const includeDevDependencies = core.getBooleanInput('include-dev-dependencies');
+        const dependencySections = [
           'dependencies',
-          'peerDependencies', 
+          'peerDependencies',
           'optionalDependencies',
           'bundleDependencies',
           'bundledDependencies'
         ];
 
-        for (const section of productionDependencySections) {
+        // Add devDependencies to check list if configured to include them
+        if (includeDevDependencies) {
+          dependencySections.push('devDependencies');
+        }
+
+        for (const section of dependencySections) {
           if (!deepEqual(basePackageJson[section], headPackageJson[section])) {
             return true;
           }

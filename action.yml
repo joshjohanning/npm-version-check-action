@@ -18,6 +18,10 @@ inputs:
     description: 'Always run version check regardless of which files changed. Default (false) only checks if project source files changed, skipping when only tests/docs/configs are modified'
     required: false
     default: 'false'
+  include-dev-dependencies:
+    description: 'Whether devDependency changes should trigger version bump requirement. Default (false) ignores devDependencies changes since they typically do not affect production functionality'
+    required: false
+    default: 'false'
 
 outputs:
   version-changed:
