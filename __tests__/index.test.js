@@ -126,23 +126,21 @@ describe('npm Version Check Action - Helper Functions', () => {
       expect(isRelevantFile('components/App.tsx')).toBe(true);
     });
 
-    test('should identify package-lock.json files as relevant but not package.json', () => {
+    test('should exclude package files from regular checking (handled by smart dependency logic)', () => {
       const { isRelevantFile } = indexModule;
-      // package.json is now handled separately via dependency checking
+      // Both package.json and package-lock.json are now handled separately via smart dependency checking
       expect(isRelevantFile('package.json')).toBe(false);
       expect(isRelevantFile('packages/core/package.json')).toBe(false);
-
-      // package-lock.json is still relevant as it reflects dependency changes
-      expect(isRelevantFile('package-lock.json')).toBe(true);
-      expect(isRelevantFile('packages/utils/package-lock.json')).toBe(true);
+      expect(isRelevantFile('package-lock.json')).toBe(false);
+      expect(isRelevantFile('packages/utils/package-lock.json')).toBe(false);
 
       // Invalid package file names should still be rejected
       expect(isRelevantFile('my-package.json')).toBe(false); // Should not match
       expect(isRelevantFile('packagejson')).toBe(false); // Should not match
       expect(isRelevantFile('some-package.json')).toBe(false); // Should not match
       expect(isRelevantFile('custom-package-lock.json')).toBe(false); // Should not match
-      expect(isRelevantFile('nested/path/package.json')).toBe(false); // package.json no longer relevant here
-      expect(isRelevantFile('deep/nested/path/package-lock.json')).toBe(true); // Should match exact filename
+      expect(isRelevantFile('nested/path/package.json')).toBe(false); // package.json excluded
+      expect(isRelevantFile('deep/nested/path/package-lock.json')).toBe(false); // package-lock.json excluded
     });
 
     test('should handle package.json pattern without ReDoS vulnerability', () => {
@@ -357,7 +355,7 @@ describe('npm Version Check Action - Helper Functions', () => {
   });
 });
 
-describe('hasPackageJsonDependencyChanges', () => {
+describe('hasPackageDependencyChanges', () => {
   beforeEach(() => {
     // Reset to default PR context
     mockGithub.context.eventName = 'pull_request';
@@ -370,24 +368,24 @@ describe('hasPackageJsonDependencyChanges', () => {
   });
 
   test('should return false for non-pull-request events', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
     mockGithub.context.eventName = 'push';
 
-    const result = await hasPackageJsonDependencyChanges();
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(false);
   });
 
   test('should return false when base or head refs are missing', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
     mockGithub.context.eventName = 'pull_request';
     mockGithub.context.payload = { pull_request: {} }; // No base ref
 
-    const result = await hasPackageJsonDependencyChanges();
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(false);
   });
 
   test('should return false when package.json has no changes', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
     // Mock git diff to return empty output (no changes)
     mockExec.exec.mockImplementation(async (command, args, _options) => {
@@ -397,12 +395,12 @@ describe('hasPackageJsonDependencyChanges', () => {
       }
     });
 
-    const result = await hasPackageJsonDependencyChanges();
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(false);
   });
 
   test('should return true when dependencies section is changed', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
     const mockDiff = `
 @@ -10,7 +10,8 @@
@@ -423,12 +421,12 @@ describe('hasPackageJsonDependencyChanges', () => {
       }
     });
 
-    const result = await hasPackageJsonDependencyChanges();
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(true);
   });
 
   test('should return true when peerDependencies section is changed', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
     const mockDiff = `
 @@ -15,6 +15,9 @@
@@ -449,12 +447,12 @@ describe('hasPackageJsonDependencyChanges', () => {
       }
     });
 
-    const result = await hasPackageJsonDependencyChanges();
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(true);
   });
 
   test('should return true when optionalDependencies section is changed', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
     const mockDiff = `
 @@ -20,4 +20,7 @@
@@ -472,12 +470,12 @@ describe('hasPackageJsonDependencyChanges', () => {
       }
     });
 
-    const result = await hasPackageJsonDependencyChanges();
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(true);
   });
 
   test('should return true when bundleDependencies section is changed', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
     const mockDiff = `
 @@ -25,4 +25,6 @@
@@ -495,12 +493,12 @@ describe('hasPackageJsonDependencyChanges', () => {
       }
     });
 
-    const result = await hasPackageJsonDependencyChanges();
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(true);
   });
 
   test('should return true when bundledDependencies section is changed', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
     const mockDiff = `
 @@ -25,4 +25,6 @@
@@ -518,12 +516,12 @@ describe('hasPackageJsonDependencyChanges', () => {
       }
     });
 
-    const result = await hasPackageJsonDependencyChanges();
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(true);
   });
 
   test('should return false when only metadata changes are present', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
     const mockDiff = `
 @@ -1,8 +1,9 @@
@@ -547,12 +545,12 @@ describe('hasPackageJsonDependencyChanges', () => {
       }
     });
 
-    const result = await hasPackageJsonDependencyChanges();
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(false);
   });
 
   test('should return false when only devDependencies are changed', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
     const mockDiff = `
 @@ -15,7 +15,8 @@
@@ -572,12 +570,12 @@ describe('hasPackageJsonDependencyChanges', () => {
       }
     });
 
-    const result = await hasPackageJsonDependencyChanges();
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(false);
   });
 
   test('should return false when only scripts are changed', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
     const mockDiff = `
 @@ -10,6 +10,7 @@
@@ -598,12 +596,12 @@ describe('hasPackageJsonDependencyChanges', () => {
       }
     });
 
-    const result = await hasPackageJsonDependencyChanges();
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(false);
   });
 
   test('should return true when mixed changes include dependencies', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
     const mockDiff = `
 @@ -1,15 +1,17 @@
@@ -633,12 +631,12 @@ describe('hasPackageJsonDependencyChanges', () => {
       }
     });
 
-    const result = await hasPackageJsonDependencyChanges();
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(true);
   });
 
   test('should return true when git command fails (err on side of caution)', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
     mockExec.exec.mockImplementation(async (command, args, _options) => {
       if (args.includes('diff') && args.includes('package.json')) {
@@ -646,15 +644,15 @@ describe('hasPackageJsonDependencyChanges', () => {
       }
     });
 
-    const result = await hasPackageJsonDependencyChanges();
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(true);
     expect(mockCore.warning).toHaveBeenCalledWith(
-      expect.stringContaining('Warning: Could not check package.json dependency changes')
+      expect.stringContaining('Warning: Could not check package dependency changes')
     );
   });
 
   test('should sanitize SHA values properly', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
     mockExec.exec.mockImplementation(async (command, args, _options) => {
       // Verify the SHA values were sanitized properly
@@ -664,7 +662,7 @@ describe('hasPackageJsonDependencyChanges', () => {
       return 0;
     });
 
-    await hasPackageJsonDependencyChanges();
+    await hasPackageDependencyChanges();
     expect(mockExec.exec).toHaveBeenCalledWith(
       'git',
       ['diff', 'def4567', 'abc1234', '--', 'package.json'],
@@ -673,7 +671,7 @@ describe('hasPackageJsonDependencyChanges', () => {
   });
 
   test('should handle complex dependency diffs with multiple sections', async () => {
-    const { hasPackageJsonDependencyChanges } = indexModule;
+    const { hasPackageDependencyChanges } = indexModule;
 
     const mockDiff = `
 @@ -1,20 +1,25 @@
@@ -706,7 +704,130 @@ describe('hasPackageJsonDependencyChanges', () => {
       }
     });
 
-    const result = await hasPackageJsonDependencyChanges();
+    const result = await hasPackageDependencyChanges();
+    expect(result).toBe(true);
+  });
+
+  test('should return true when package-lock.json has actual dependency changes', async () => {
+    const { hasPackageDependencyChanges } = indexModule;
+
+    const mockPackageLockDiff = `
+@@ -100,6 +100,15 @@
+     "some-package": {
+       "version": "1.0.0",
+-      "resolved": "https://registry.npmjs.org/some-package/-/some-package-1.0.0.tgz",
+-      "integrity": "sha512-oldintegrity"
++      "resolved": "https://registry.npmjs.org/some-package/-/some-package-1.1.0.tgz",
++      "integrity": "sha512-newintegrity"
+     },
++    "new-dependency": {
++      "version": "2.0.0",
++      "resolved": "https://registry.npmjs.org/new-dependency/-/new-dependency-2.0.0.tgz",
++      "integrity": "sha512-newdepintegrity",
++      "dependencies": {
++        "sub-dep": "^1.0.0"
++      }
++    }
+   }
+`;
+
+    mockExec.exec.mockImplementation(async (command, args, options) => {
+      if (args.includes('diff') && args.includes('package.json')) {
+        // No package.json changes
+        return 0;
+      }
+      if (args.includes('diff') && args.includes('package-lock.json')) {
+        if (options.listeners && options.listeners.stdout) {
+          options.listeners.stdout(mockPackageLockDiff);
+        }
+        return 0;
+      }
+    });
+
+    const result = await hasPackageDependencyChanges();
+    expect(result).toBe(true);
+  });
+
+  test('should return false when package-lock.json has only version metadata changes', async () => {
+    const { hasPackageDependencyChanges } = indexModule;
+
+    const mockPackageLockDiff = `
+@@ -1,8 +1,8 @@
+ {
+   "name": "my-package",
+-  "version": "1.0.0",
++  "version": "1.0.1",
+   "lockfileVersion": 2,
+   "requires": true,
+   "packages": {
+     "": {
+-      "version": "1.0.0"
++      "version": "1.0.1"
+     }
+   }
+ }
+`;
+
+    mockExec.exec.mockImplementation(async (command, args, options) => {
+      if (args.includes('diff') && args.includes('package.json')) {
+        // No package.json changes
+        return 0;
+      }
+      if (args.includes('diff') && args.includes('package-lock.json')) {
+        if (options.listeners && options.listeners.stdout) {
+          options.listeners.stdout(mockPackageLockDiff);
+        }
+        return 0;
+      }
+    });
+
+    const result = await hasPackageDependencyChanges();
+    expect(result).toBe(false);
+  });
+
+  test('should return true when both package.json and package-lock.json have changes', async () => {
+    const { hasPackageDependencyChanges } = indexModule;
+
+    const mockPackageJsonDiff = `
+@@ -10,7 +10,8 @@
+   "dependencies": {
+-    "express": "^4.18.0"
++    "express": "^4.19.0",
++    "lodash": "^4.17.21"
+   }
+`;
+
+    const mockPackageLockDiff = `
+@@ -50,6 +50,12 @@
+     "express": {
+       "version": "4.19.0",
+-      "resolved": "https://registry.npmjs.org/express/-/express-4.18.0.tgz"
++      "resolved": "https://registry.npmjs.org/express/-/express-4.19.0.tgz"
+     },
++    "lodash": {
++      "version": "4.17.21",
++      "resolved": "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
++      "integrity": "sha512-newintegrity"
++    }
+   }
+`;
+
+    mockExec.exec.mockImplementation(async (command, args, options) => {
+      if (args.includes('diff') && args.includes('package.json')) {
+        if (options.listeners && options.listeners.stdout) {
+          options.listeners.stdout(mockPackageJsonDiff);
+        }
+        return 0;
+      }
+      if (args.includes('diff') && args.includes('package-lock.json')) {
+        if (options.listeners && options.listeners.stdout) {
+          options.listeners.stdout(mockPackageLockDiff);
+        }
+        return 0;
+      }
+    });
+
+    const result = await hasPackageDependencyChanges();
     expect(result).toBe(true);
   });
 });
@@ -825,7 +946,7 @@ describe('npm Version Check Action - Integration Tests', () => {
       const { execGit } = indexModule;
       mockExec.exec.mockResolvedValue(0);
 
-      // Should not throw for the double dash separator used in hasPackageJsonDependencyChanges
+      // Should not throw for the double dash separator used in hasPackageDependencyChanges
       await expect(execGit(['diff', 'abc1234', 'def4567', '--', 'package.json'])).resolves.not.toThrow();
     });
   });

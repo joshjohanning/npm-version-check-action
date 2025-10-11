@@ -13,6 +13,7 @@ This action prevents developers from forgetting to bump package.json version bef
 ## ✨ Features
 
 - 🎯 **Smart file detection** - Only runs when JavaScript/TypeScript/package files are modified
+- 🧠 **Intelligent dependency checking** - Distinguishes between actual dependency changes vs metadata-only changes in package.json and package-lock.json
 - 📊 **Semantic versioning validation** - Ensures new version is higher than previous release
 - 🏷️ **Git tag comparison** - Compares against the latest git tag
 - 🚀 **Shallow clone compatible** - Automatically fetches tags, works with default checkout
@@ -130,21 +131,38 @@ jobs:
 
 ## 🎯 How It Works
 
-1. **File Change Detection**: Checks if JavaScript, TypeScript, or package files were modified in the PR
-2. **Version Extraction**: Reads the current version from `package.json`
-3. **Tag Comparison**: Fetches the latest git tag and compares versions
-4. **Semantic Validation**: Ensures the new version is higher than the previous release
-5. **Clear Feedback**: Provides success or error messages with actionable hints
+1. **Smart File Change Detection**: Analyzes which files were modified in the PR
+   - JavaScript/TypeScript files trigger version checks
+   - Package files (`package.json`, `package-lock.json`) undergo intelligent dependency analysis
+2. **Intelligent Dependency Analysis**: For package files, distinguishes between:
+   - **Functional changes**: Actual dependency additions, updates, or removals that affect functionality
+   - **Metadata changes**: Version bumps, description updates, scripts changes, or devDependency changes that don't affect runtime
+3. **Version Extraction**: Reads the current version from `package.json`
+4. **Tag Comparison**: Fetches the latest git tag and compares versions
+5. **Semantic Validation**: Ensures the new version is higher than the previous release
+6. **Clear Feedback**: Provides success or error messages with actionable hints
 
-### Supported File Extensions
+### Smart File Detection
 
-The action checks for changes in files with these extensions:
+The action intelligently handles different types of file changes:
+
+#### JavaScript/TypeScript Files (Always Trigger Version Check)
 
 - `.js` - JavaScript files
 - `.ts` - TypeScript files
 - `.jsx` - React JavaScript files
 - `.tsx` - React TypeScript files
-- `package*.json` - Package configuration files
+
+#### Package Files (Smart Dependency Analysis)
+
+- `package.json` - Only triggers version check for **dependency changes**, not metadata
+  - ✅ **Triggers check**: Changes to `dependencies`, `peerDependencies`, `optionalDependencies`, `bundleDependencies`
+  - ❌ **Skips check**: Changes to `version`, `description`, `scripts`, `devDependencies`, `author`, etc.
+- `package-lock.json` - Only triggers version check for **actual dependency changes**
+  - ✅ **Triggers check**: New packages, changed package URLs/integrity, dependency tree changes
+  - ❌ **Skips check**: Version metadata updates, lockfile format changes
+
+This intelligent approach prevents unnecessary version bumps when only non-functional changes are made.
 
 ## 📋 Version Increment Examples
 

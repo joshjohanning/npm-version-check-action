@@ -250,10 +250,10 @@ export function isRelevantFile(file) {
     return PACKAGE_FILENAMES.includes(fileName);
   };
 
-  // Include package-lock.json (dependency changes reflected here)
-  // but exclude package.json since we need to check dependencies specifically
-  if (isPackageFile(file) && path.basename(file) !== 'package.json') {
-    return true;
+  // Exclude both package.json and package-lock.json from regular file checking
+  // They need smart dependency analysis instead of blanket inclusion
+  if (isPackageFile(file)) {
+    return false;
   }
 
   // At this point, include only JavaScript/TypeScript files (package files were already handled above)
@@ -261,11 +261,11 @@ export function isRelevantFile(file) {
 }
 
 /**
- * Check if package.json has dependency changes (not just metadata changes)
+ * Check if package files have actual dependency changes (not just metadata changes)
+ * This covers both package.json and package-lock.json files
  */
-export async function hasPackageJsonDependencyChanges() {
+export async function hasPackageDependencyChanges() {
   try {
-    // Get the diff for package.json specifically
     const context = github.context;
     if (context.eventName !== 'pull_request') {
       return false;
@@ -281,26 +281,53 @@ export async function hasPackageJsonDependencyChanges() {
     const sanitizedBaseRef = sanitizeSHA(baseRef, 'baseRef');
     const sanitizedHeadRef = sanitizeSHA(headRef, 'headRef');
 
-    // Get the diff for package.json only
-    const diffOutput = await execGit(['diff', sanitizedBaseRef, sanitizedHeadRef, '--', 'package.json']);
+    // Check package.json for dependency changes
+    const packageJsonDiff = await execGit(['diff', sanitizedBaseRef, sanitizedHeadRef, '--', 'package.json']);
 
-    if (!diffOutput) {
-      return false; // No changes to package.json
+    if (packageJsonDiff) {
+      // Check if the diff contains dependency-related changes
+      const dependencySections = [
+        '"dependencies"',
+        '"peerDependencies"',
+        '"optionalDependencies"',
+        '"bundleDependencies"',
+        '"bundledDependencies"'
+      ];
+
+      if (dependencySections.some(section => packageJsonDiff.includes(section))) {
+        return true;
+      }
     }
 
-    // Check if the diff contains dependency-related changes
-    const dependencySections = [
-      '"dependencies"',
-      '"peerDependencies"',
-      '"optionalDependencies"',
-      '"bundleDependencies"',
-      '"bundledDependencies"'
-    ];
+    // Check package-lock.json for actual dependency changes (not just version metadata)
+    const packageLockDiff = await execGit(['diff', sanitizedBaseRef, sanitizedHeadRef, '--', 'package-lock.json']);
 
-    return dependencySections.some(section => diffOutput.includes(section));
+    if (packageLockDiff) {
+      // Look for actual dependency changes in package-lock.json
+      // These patterns indicate real dependency changes, not just version bumps
+      const dependencyChangePatterns = [
+        '"resolved":', // New or changed package URLs
+        '"integrity":', // New or changed package checksums
+        '"dependencies": {', // New dependency blocks
+        '"dev": true', // Dev dependency flag changes (though we might not care about dev deps)
+        '"dev": false', // Production dependency changes
+        '"peer": true', // Peer dependency changes
+        '"optional": true' // Optional dependency changes
+      ];
+
+      // Only consider it a dependency change if we see actual package changes
+      // not just version number updates in the root package
+      const hasRealDependencyChanges = dependencyChangePatterns.some(pattern => packageLockDiff.includes(pattern));
+
+      if (hasRealDependencyChanges) {
+        return true;
+      }
+    }
+
+    return false;
   } catch (error) {
     // If we can't determine dependency changes, err on the side of caution
-    logMessage(`Warning: Could not check package.json dependency changes: ${error.message}`, 'warning');
+    logMessage(`Warning: Could not check package dependency changes: ${error.message}`, 'warning');
     return true;
   }
 }
@@ -462,12 +489,12 @@ export async function run() {
       // Check for regular relevant file changes (JS/TS files, package-lock.json)
       const hasRegularChanges = hasRelevantFileChanges(changedFiles);
 
-      // Check specifically for package.json dependency changes
-      const hasPackageDepChanges = await hasPackageJsonDependencyChanges();
+      // Check specifically for package dependency changes (package.json and package-lock.json)
+      const hasPackageDepChanges = await hasPackageDependencyChanges();
 
       if (!hasRegularChanges && !hasPackageDepChanges) {
         logMessage(
-          '⏭️  No JavaScript/TypeScript files or package dependency changes detected, skipping version check',
+          '⏭️  No JavaScript/TypeScript files or dependency changes detected, skipping version check',
           'warning'
         );
         return;
@@ -477,7 +504,7 @@ export async function run() {
         logMessage('✅ Package dependency changes detected, proceeding with version check...');
       }
       if (hasRegularChanges) {
-        logMessage('✅ JavaScript/TypeScript or package-lock.json changes detected, proceeding with version check...');
+        logMessage('✅ JavaScript/TypeScript file changes detected, proceeding with version check...');
         const relevantFiles = changedFiles.filter(file => isRelevantFile(file));
         logMessage(`Changed files: ${relevantFiles.join(', ')}`);
       }
