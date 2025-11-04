@@ -353,6 +353,8 @@ function deepEqual(a, b, visited = new WeakSet()) {
  * @returns {boolean} True if only metadata changed
  */
 function isOnlyMetadataChange(basePackage, headPackage) {
+  // If either package is missing, it means the package was added or removed,
+  // which is a significant change and not a metadata-only change.
   if (!basePackage || !headPackage) return false;
 
   // Properties that matter for actual dependency changes
