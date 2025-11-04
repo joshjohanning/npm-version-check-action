@@ -1432,6 +1432,80 @@ describe('hasPackageDependencyChanges', () => {
     const result = await hasPackageDependencyChanges();
     expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false });
   });
+
+  test('should return false when package-lock.json has only peer flag metadata changes (npm v7+ format)', async () => {
+    const { hasPackageDependencyChanges } = indexModule;
+
+    const packageJson = {
+      name: 'test-package',
+      version: '1.0.0'
+    };
+
+    // Base package-lock.json with peer: true flag
+    const basePackageLock = {
+      name: 'test-package',
+      version: '1.0.0',
+      lockfileVersion: 3,
+      packages: {
+        '': {
+          name: 'test-package',
+          version: '1.0.0'
+        },
+        'node_modules/@octokit/core': {
+          version: '5.2.2',
+          resolved: 'https://registry.npmjs.org/@octokit/core/-/core-5.2.2.tgz',
+          integrity: 'sha512-example123',
+          peer: true,
+          dependencies: {
+            '@octokit/auth-token': '^4.0.0'
+          }
+        },
+        'node_modules/typescript': {
+          version: '5.0.0',
+          resolved: 'https://registry.npmjs.org/typescript/-/typescript-5.0.0.tgz',
+          integrity: 'sha512-typescriptexample',
+          peer: true
+        }
+      }
+    };
+
+    // Head package-lock.json with peer: true flag removed (only metadata change)
+    const headPackageLock = {
+      name: 'test-package',
+      version: '1.0.0',
+      lockfileVersion: 3,
+      packages: {
+        '': {
+          name: 'test-package',
+          version: '1.0.0'
+        },
+        'node_modules/@octokit/core': {
+          version: '5.2.2',
+          resolved: 'https://registry.npmjs.org/@octokit/core/-/core-5.2.2.tgz',
+          integrity: 'sha512-example123',
+          // peer: true removed - this is just a metadata change
+          dependencies: {
+            '@octokit/auth-token': '^4.0.0'
+          }
+        },
+        'node_modules/typescript': {
+          version: '5.0.0',
+          resolved: 'https://registry.npmjs.org/typescript/-/typescript-5.0.0.tgz',
+          integrity: 'sha512-typescriptexample'
+          // peer: true removed - this is just a metadata change
+        }
+      }
+    };
+
+    // Ensure include-dev-dependencies is false (default)
+    mockCore.getBooleanInput.mockReturnValue(false);
+
+    mockExec.exec.mockImplementation(createExecMock(packageJson, packageJson, basePackageLock, headPackageLock));
+
+    const result = await hasPackageDependencyChanges();
+    // Should return false because only peer metadata changed, no actual dependency changes
+    expect(result).toEqual({ hasChanges: false, onlyDevDependencies: false });
+  });
 });
 
 describe('npm Version Check Action - Integration Tests', () => {

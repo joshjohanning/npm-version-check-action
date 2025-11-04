@@ -347,10 +347,34 @@ function deepEqual(a, b, visited = new WeakSet()) {
 }
 
 /**
+ * Check if a package change is only metadata (peer, dev flags) without actual dependency changes
+ * @param {Object} basePackage - Base version of package object
+ * @param {Object} headPackage - Head version of package object
+ * @returns {boolean} True if only metadata changed
+ */
+function isOnlyMetadataChange(basePackage, headPackage) {
+  if (!basePackage || !headPackage) return false;
+
+  // Properties that matter for actual dependency changes
+  const significantProps = ['version', 'resolved', 'integrity', 'dependencies', 'requires'];
+
+  // Check if any significant properties changed
+  for (const prop of significantProps) {
+    if (!deepEqual(basePackage[prop], headPackage[prop])) {
+      return false; // A significant change was found
+    }
+  }
+
+  // If we get here, only metadata (like peer, dev flags) changed
+  return true;
+}
+
+/**
  * Get changed package keys from package-lock.json dependencies or packages sections
+ * Excludes metadata-only changes (like peer: true flag changes)
  * @param {Object} baseObj - Base version of dependencies/packages object
  * @param {Object} headObj - Head version of dependencies/packages object
- * @returns {Set<string>} Set of package keys that have changed
+ * @returns {Set<string>} Set of package keys that have changed (excluding metadata-only changes)
  */
 function getChangedPackageKeys(baseObj, headObj) {
   const changedKeys = new Set();
@@ -362,7 +386,16 @@ function getChangedPackageKeys(baseObj, headObj) {
     // Skip the root package entry (empty string key) as it represents the project itself
     if (key === '') continue;
 
-    if (!deepEqual(baseObj?.[key], headObj?.[key])) {
+    const basePackage = baseObj?.[key];
+    const headPackage = headObj?.[key];
+
+    // Check if packages are different
+    if (!deepEqual(basePackage, headPackage)) {
+      // If only metadata changed (peer, dev flags), skip it
+      if (isOnlyMetadataChange(basePackage, headPackage)) {
+        logMessage(`Debug: Skipping metadata-only change for package: ${key}`, 'debug');
+        continue;
+      }
       changedKeys.add(key);
     }
   }
@@ -502,7 +535,7 @@ export async function hasPackageDependencyChanges() {
         if (dependenciesChanged || packagesChanged) {
           logMessage('Debug: package-lock.json has changes', 'debug');
 
-          // Determine which packages changed
+          // Determine which packages changed (excluding metadata-only changes)
           let changedKeys = new Set();
 
           if (packagesChanged) {
@@ -511,23 +544,28 @@ export async function hasPackageDependencyChanges() {
             changedKeys = getChangedPackageKeys(baseLock.dependencies, headLock.dependencies);
           }
 
-          // Check if all changes are dev dependencies only
-          const allChangesAreDevOnly = areAllChangesDevDependencies(baseLock, headLock, changedKeys);
-
-          if (allChangesAreDevOnly) {
-            hasAnyDevChanges = true;
-            if (includeDevDependencies) {
-              logMessage(
-                'Debug: package-lock.json devDependencies change detected (include-dev-dependencies is true)',
-                'debug'
-              );
-              hasProductionChanges = true;
-            } else {
-              logMessage('Debug: Only devDependencies changed in package-lock.json', 'debug');
-            }
+          // If no actual changes after filtering out metadata-only changes, skip
+          if (changedKeys.size === 0) {
+            logMessage('Debug: package-lock.json changes were metadata-only, skipping', 'debug');
           } else {
-            logMessage('Debug: package-lock.json has production dependency changes', 'debug');
-            hasProductionChanges = true;
+            // Check if all changes are dev dependencies only
+            const allChangesAreDevOnly = areAllChangesDevDependencies(baseLock, headLock, changedKeys);
+
+            if (allChangesAreDevOnly) {
+              hasAnyDevChanges = true;
+              if (includeDevDependencies) {
+                logMessage(
+                  'Debug: package-lock.json devDependencies change detected (include-dev-dependencies is true)',
+                  'debug'
+                );
+                hasProductionChanges = true;
+              } else {
+                logMessage('Debug: Only devDependencies changed in package-lock.json', 'debug');
+              }
+            } else {
+              logMessage('Debug: package-lock.json has production dependency changes', 'debug');
+              hasProductionChanges = true;
+            }
           }
         }
       } catch (error) {
