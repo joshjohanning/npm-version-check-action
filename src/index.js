@@ -7,7 +7,7 @@ import semver from 'semver';
 
 // Shared constants for validation
 const SAFE_GIT_COMMANDS = ['diff', 'fetch', 'tag', 'show', 'log', 'diff-tree'];
-const SAFE_GIT_OPTIONS = ['-l', '--name-only', '--tags', '--', '-r', '--no-commit-id', '--format=%H %s'];
+const SAFE_GIT_OPTIONS = ['-l', '--name-only', '--tags', '--', '-r', '--no-commit-id', '--format=%H %s', 'origin'];
 
 // Default skip keyword for bypassing version check on specific commits
 const DEFAULT_SKIP_KEYWORD = '[skip version]';
@@ -266,6 +266,16 @@ export async function getCommitsWithMessages() {
   // Sanitize SHA values to prevent command injection
   const sanitizedBaseRef = sanitizeSHA(baseRef, 'baseRef');
   const sanitizedHeadRef = sanitizeSHA(headRef, 'headRef');
+
+  // Fetch the base ref to ensure commit history is available (shallow clones only have HEAD)
+  try {
+    await execGit(['fetch', 'origin', sanitizedBaseRef]);
+    logMessage('✅ Fetched base commit for skip keyword analysis', 'debug');
+  } catch (error) {
+    logMessage(`⚠️  Could not fetch base commit: ${error.message}. Falling back to diff-based approach.`, 'warning');
+    // Return empty to trigger fallback to getChangedFiles
+    return [];
+  }
 
   // Get commits with format: "<sha> <subject>"
   const output = await execGit(['log', '--format=%H %s', `${sanitizedBaseRef}..${sanitizedHeadRef}`]);
@@ -865,12 +875,18 @@ export async function run() {
       let changedFiles;
       if (skipVersionKeyword) {
         const result = await getChangedFilesWithSkipSupport(skipVersionKeyword);
-        changedFiles = result.files;
-        if (result.skippedCommits > 0) {
-          logMessage(
-            `⏭️  Skipped ${result.skippedCommits} of ${result.totalCommits} commits containing "${skipVersionKeyword}"`,
-            'notice'
-          );
+        // If no commits were found (shallow clone fallback), use regular getChangedFiles
+        if (result.totalCommits === 0) {
+          logMessage('ℹ️  Could not analyze individual commits, using standard file diff', 'debug');
+          changedFiles = await getChangedFiles();
+        } else {
+          changedFiles = result.files;
+          if (result.skippedCommits > 0) {
+            logMessage(
+              `⏭️  Skipped ${result.skippedCommits} of ${result.totalCommits} commits containing "${skipVersionKeyword}"`,
+              'notice'
+            );
+          }
         }
       } else {
         changedFiles = await getChangedFiles();
