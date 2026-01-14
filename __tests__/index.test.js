@@ -72,9 +72,17 @@ function createExecMock(basePackageJson, headPackageJson, basePackageLock, headP
     if (args.includes('fetch') && args.includes('--tags')) {
       output = '';
     }
-    // Handle getChangedFiles calls
+    // Handle getChangedFiles calls (legacy)
     else if (args.includes('diff') && args.includes('--name-only')) {
       output = '';
+    }
+    // Handle getCommitsWithMessages calls (git log --format=%H %s)
+    else if (args.includes('log') && args.includes('--format=%H %s')) {
+      output = ''; // Default: no commits
+    }
+    // Handle getFilesForCommit calls (git diff-tree)
+    else if (args.includes('diff-tree') && args.includes('--no-commit-id')) {
+      output = ''; // Default: no files
     }
     // Handle package.json file retrieval
     else if (args.includes('show') && args.includes(`${TEST_BASE_SHA}:package.json`)) {
@@ -1822,6 +1830,220 @@ describe('npm Version Check Action - Integration Tests', () => {
     });
   });
 
+  describe('getCommitsWithMessages function', () => {
+    beforeEach(() => {
+      mockGithub.context.eventName = 'pull_request';
+      mockGithub.context.sha = TEST_HEAD_SHA;
+      mockGithub.context.payload.pull_request = { base: { sha: TEST_BASE_SHA } };
+    });
+
+    test('should return commits with their messages', async () => {
+      const { getCommitsWithMessages } = indexModule;
+
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('log') && args.includes('--format=%H %s')) {
+          options.listeners.stdout(
+            'abc1234567890abcdef1234567890abcdef1234 Add feature\ndef4567890abcdef1234567890abcdef123456 Fix bug'
+          );
+        }
+        return 0;
+      });
+
+      const commits = await getCommitsWithMessages();
+
+      expect(commits).toHaveLength(2);
+      expect(commits[0]).toEqual({ sha: 'abc1234567890abcdef1234567890abcdef1234', message: 'Add feature' });
+      expect(commits[1]).toEqual({ sha: 'def4567890abcdef1234567890abcdef123456', message: 'Fix bug' });
+    });
+
+    test('should return empty array for non-pull request events', async () => {
+      const { getCommitsWithMessages } = indexModule;
+
+      mockGithub.context.eventName = 'push';
+
+      const commits = await getCommitsWithMessages();
+      expect(commits).toEqual([]);
+    });
+
+    test('should handle empty output', async () => {
+      const { getCommitsWithMessages } = indexModule;
+
+      mockExec.exec.mockImplementation(async (_command, _args, _options) => {
+        // Don't call stdout listener - simulates empty output
+        return 0;
+      });
+
+      const commits = await getCommitsWithMessages();
+      expect(commits).toEqual([]);
+    });
+  });
+
+  describe('getFilesForCommit function', () => {
+    test('should return files changed in a commit', async () => {
+      const { getFilesForCommit } = indexModule;
+
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('diff-tree')) {
+          options.listeners.stdout('src/index.js\nlib/utils.ts\npackage.json');
+        }
+        return 0;
+      });
+
+      const files = await getFilesForCommit('abc1234567890abcdef1234567890abcdef1234');
+
+      expect(files).toEqual(['src/index.js', 'lib/utils.ts', 'package.json']);
+    });
+
+    test('should return empty array for no changes', async () => {
+      const { getFilesForCommit } = indexModule;
+
+      mockExec.exec.mockImplementation(async (_command, _args, _options) => {
+        // Don't call stdout listener - simulates empty output
+        return 0;
+      });
+
+      const files = await getFilesForCommit('abc1234567890abcdef1234567890abcdef1234');
+      expect(files).toEqual([]);
+    });
+  });
+
+  describe('getChangedFilesWithSkipSupport function', () => {
+    beforeEach(() => {
+      mockGithub.context.eventName = 'pull_request';
+      mockGithub.context.sha = TEST_HEAD_SHA;
+      mockGithub.context.payload.pull_request = { base: { sha: TEST_BASE_SHA } };
+    });
+
+    test('should exclude files from commits with skip keyword', async () => {
+      const { getChangedFilesWithSkipSupport } = indexModule;
+
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('log') && args.includes('--format=%H %s')) {
+          options.listeners.stdout(
+            'abc1234567890abcdef1234567890abcdef1234 [skip version] Fix typo\ndef4567890abcdef1234567890abcdef123456 Add feature'
+          );
+        } else if (args.includes('diff-tree') && args[4] === 'abc1234567890abcdef1234567890abcdef1234') {
+          options.listeners.stdout('src/index.js'); // This should be skipped
+        } else if (args.includes('diff-tree') && args[4] === 'def4567890abcdef1234567890abcdef123456') {
+          options.listeners.stdout('src/utils.js\nlib/helper.ts');
+        }
+        return 0;
+      });
+
+      const result = await getChangedFilesWithSkipSupport('[skip version]');
+
+      expect(result.files).toEqual(['src/utils.js', 'lib/helper.ts']);
+      expect(result.skippedCommits).toBe(1);
+      expect(result.totalCommits).toBe(2);
+    });
+
+    test('should include all files when no commits have skip keyword', async () => {
+      const { getChangedFilesWithSkipSupport } = indexModule;
+
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('log') && args.includes('--format=%H %s')) {
+          options.listeners.stdout(
+            'abc1234567890abcdef1234567890abcdef1234 Add feature\ndef4567890abcdef1234567890abcdef123456 Fix bug'
+          );
+        } else if (args.includes('diff-tree') && args[4] === 'abc1234567890abcdef1234567890abcdef1234') {
+          options.listeners.stdout('src/index.js');
+        } else if (args.includes('diff-tree') && args[4] === 'def4567890abcdef1234567890abcdef123456') {
+          options.listeners.stdout('src/utils.js');
+        }
+        return 0;
+      });
+
+      const result = await getChangedFilesWithSkipSupport('[skip version]');
+
+      expect(result.files).toContain('src/index.js');
+      expect(result.files).toContain('src/utils.js');
+      expect(result.skippedCommits).toBe(0);
+      expect(result.totalCommits).toBe(2);
+    });
+
+    test('should return empty files when all commits are skipped', async () => {
+      const { getChangedFilesWithSkipSupport } = indexModule;
+
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('log') && args.includes('--format=%H %s')) {
+          options.listeners.stdout('abc1234567890abcdef1234567890abcdef1234 [skip version] Fix typo');
+        }
+        return 0;
+      });
+
+      const result = await getChangedFilesWithSkipSupport('[skip version]');
+
+      expect(result.files).toEqual([]);
+      expect(result.skippedCommits).toBe(1);
+      expect(result.totalCommits).toBe(1);
+    });
+
+    test('should deduplicate files changed in multiple commits', async () => {
+      const { getChangedFilesWithSkipSupport } = indexModule;
+
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('log') && args.includes('--format=%H %s')) {
+          options.listeners.stdout(
+            'abc1234567890abcdef1234567890abcdef1234 Add feature\ndef4567890abcdef1234567890abcdef123456 Fix bug'
+          );
+        } else if (args.includes('diff-tree') && args[4] === 'abc1234567890abcdef1234567890abcdef1234') {
+          options.listeners.stdout('src/index.js\nsrc/utils.js');
+        } else if (args.includes('diff-tree') && args[4] === 'def4567890abcdef1234567890abcdef123456') {
+          options.listeners.stdout('src/index.js'); // Same file as in first commit
+        }
+        return 0;
+      });
+
+      const result = await getChangedFilesWithSkipSupport('[skip version]');
+
+      // Should contain only unique files
+      expect(result.files).toHaveLength(2);
+      expect(result.files).toContain('src/index.js');
+      expect(result.files).toContain('src/utils.js');
+    });
+
+    test('should include file if changed in both skipped and non-skipped commits', async () => {
+      const { getChangedFilesWithSkipSupport } = indexModule;
+
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('log') && args.includes('--format=%H %s')) {
+          options.listeners.stdout(
+            'abc1234567890abcdef1234567890abcdef1234 [skip version] Fix typo in index\ndef4567890abcdef1234567890abcdef123456 Add feature to index'
+          );
+        } else if (args.includes('diff-tree') && args[4] === 'abc1234567890abcdef1234567890abcdef1234') {
+          options.listeners.stdout('src/index.js'); // Skipped commit changes this
+        } else if (args.includes('diff-tree') && args[4] === 'def4567890abcdef1234567890abcdef123456') {
+          options.listeners.stdout('src/index.js'); // Non-skipped commit also changes this
+        }
+        return 0;
+      });
+
+      const result = await getChangedFilesWithSkipSupport('[skip version]');
+
+      // File should be included because it was changed in a non-skipped commit
+      expect(result.files).toContain('src/index.js');
+      expect(result.skippedCommits).toBe(1);
+      expect(result.totalCommits).toBe(2);
+    });
+
+    test('should return empty when no commits in PR', async () => {
+      const { getChangedFilesWithSkipSupport } = indexModule;
+
+      mockExec.exec.mockImplementation(async (_command, args, _options) => {
+        if (args.includes('log') && args.includes('--format=%H %s')) {
+          // Empty output - no commits
+        }
+        return 0;
+      });
+
+      const result = await getChangedFilesWithSkipSupport('[skip version]');
+
+      expect(result.files).toEqual([]);
+      expect(result.skippedCommits).toBe(0);
+      expect(result.totalCommits).toBe(0);
+    });
+  });
+
   describe('hasPackageDependencyChanges JSON parsing errors', () => {
     test('should handle JSON parsing error in package.json gracefully', async () => {
       const { hasPackageDependencyChanges } = indexModule;
@@ -1897,7 +2119,12 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       // Mock changed files to include package.json with dependency changes
       mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('diff') && args.includes('--name-only')) {
+        // Handle git log for getCommitsWithMessages
+        if (args.includes('log') && args.includes('--format=%H %s')) {
+          options.listeners.stdout('abc1234567890 Add new feature');
+        }
+        // Handle git diff-tree for getFilesForCommit
+        else if (args.includes('diff-tree') && args.includes('--no-commit-id')) {
           options.listeners.stdout('package.json\nsrc/index.js');
         } else if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:package.json`) {
           options.listeners.stdout('{ "name": "test", "dependencies": { "lodash": "^4.0.0" } }');
@@ -1922,7 +2149,12 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       // Mock changed files to include JS files
       mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('diff') && args.includes('--name-only')) {
+        // Handle git log for getCommitsWithMessages
+        if (args.includes('log') && args.includes('--format=%H %s')) {
+          options.listeners.stdout('abc1234567890 Add new feature');
+        }
+        // Handle git diff-tree for getFilesForCommit
+        else if (args.includes('diff-tree') && args.includes('--no-commit-id')) {
           options.listeners.stdout('src/index.js\nlib/utils.ts');
         } else if (args.includes('show') && args[1].includes('package.json')) {
           options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
@@ -1946,7 +2178,12 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       // Mock no existing tags
       mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('diff') && args.includes('--name-only')) {
+        // Handle git log for getCommitsWithMessages
+        if (args.includes('log') && args.includes('--format=%H %s')) {
+          options.listeners.stdout('abc1234567890 Add new feature');
+        }
+        // Handle git diff-tree for getFilesForCommit
+        else if (args.includes('diff-tree') && args.includes('--no-commit-id')) {
           options.listeners.stdout('src/index.js');
         } else if (args.includes('tag')) {
           options.listeners.stdout(''); // No tags
@@ -1968,7 +2205,12 @@ describe('npm Version Check Action - Integration Tests', () => {
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.0.0' }));
 
       mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('diff') && args.includes('--name-only')) {
+        // Handle git log for getCommitsWithMessages
+        if (args.includes('log') && args.includes('--format=%H %s')) {
+          options.listeners.stdout('abc1234567890 Add new feature');
+        }
+        // Handle git diff-tree for getFilesForCommit
+        else if (args.includes('diff-tree') && args.includes('--no-commit-id')) {
           options.listeners.stdout('src/index.js');
         } else if (args.includes('tag')) {
           options.listeners.stdout('v1.0.0');
@@ -1994,7 +2236,12 @@ describe('npm Version Check Action - Integration Tests', () => {
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '0.9.0' }));
 
       mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('diff') && args.includes('--name-only')) {
+        // Handle git log for getCommitsWithMessages
+        if (args.includes('log') && args.includes('--format=%H %s')) {
+          options.listeners.stdout('abc1234567890 Add new feature');
+        }
+        // Handle git diff-tree for getFilesForCommit
+        else if (args.includes('diff-tree') && args.includes('--no-commit-id')) {
           options.listeners.stdout('src/index.js');
         } else if (args.includes('tag')) {
           options.listeners.stdout('v1.0.0');
@@ -2020,7 +2267,12 @@ describe('npm Version Check Action - Integration Tests', () => {
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.1.0' }));
 
       mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('diff') && args.includes('--name-only')) {
+        // Handle git log for getCommitsWithMessages
+        if (args.includes('log') && args.includes('--format=%H %s')) {
+          options.listeners.stdout('abc1234567890 Add new feature');
+        }
+        // Handle git diff-tree for getFilesForCommit
+        else if (args.includes('diff-tree') && args.includes('--no-commit-id')) {
           options.listeners.stdout('src/index.js');
         } else if (args.includes('tag')) {
           options.listeners.stdout('v1.0.0');

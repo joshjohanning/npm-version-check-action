@@ -6,8 +6,11 @@ import * as path from 'path';
 import semver from 'semver';
 
 // Shared constants for validation
-const SAFE_GIT_COMMANDS = ['diff', 'fetch', 'tag', 'show'];
-const SAFE_GIT_OPTIONS = ['-l', '--name-only', '--tags', '--'];
+const SAFE_GIT_COMMANDS = ['diff', 'fetch', 'tag', 'show', 'log', 'diff-tree'];
+const SAFE_GIT_OPTIONS = ['-l', '--name-only', '--tags', '--', '-r', '--no-commit-id', '--format=%H %s'];
+
+// Default skip keyword for bypassing version check on specific commits
+const DEFAULT_SKIP_KEYWORD = '[skip version]';
 const SHA_PATTERN = /^[a-f0-9]{7,40}$/i;
 // Pattern to detect shell metacharacters and other dangerous characters for command injection prevention
 const SHELL_INJECTION_CHARS = /[;&|`$()'"<>]/;
@@ -243,6 +246,96 @@ export async function getChangedFiles() {
 }
 
 /**
+ * Get commits in the current PR with their messages
+ * @returns {Promise<Array<{sha: string, message: string}>>} Array of commit objects with SHA and message
+ */
+export async function getCommitsWithMessages() {
+  const context = github.context;
+
+  if (context.eventName !== 'pull_request') {
+    return [];
+  }
+
+  const baseRef = context.payload.pull_request?.base?.sha;
+  const headRef = context.sha;
+
+  if (!baseRef || !headRef) {
+    throw new Error('Could not determine base and head refs for PR');
+  }
+
+  // Sanitize SHA values to prevent command injection
+  const sanitizedBaseRef = sanitizeSHA(baseRef, 'baseRef');
+  const sanitizedHeadRef = sanitizeSHA(headRef, 'headRef');
+
+  // Get commits with format: "<sha> <subject>"
+  const output = await execGit(['log', '--format=%H %s', `${sanitizedBaseRef}..${sanitizedHeadRef}`]);
+
+  if (!output) {
+    return [];
+  }
+
+  // Parse each line into {sha, message}
+  return output.split('\n').map(line => {
+    const spaceIndex = line.indexOf(' ');
+    if (spaceIndex === -1) {
+      return { sha: line, message: '' };
+    }
+    return {
+      sha: line.substring(0, spaceIndex),
+      message: line.substring(spaceIndex + 1)
+    };
+  });
+}
+
+/**
+ * Get files changed in a specific commit
+ * @param {string} sha - The commit SHA
+ * @returns {Promise<string[]>} Array of file paths changed in the commit
+ */
+export async function getFilesForCommit(sha) {
+  const sanitizedSha = sanitizeSHA(sha, 'commitSha');
+
+  const output = await execGit(['diff-tree', '--no-commit-id', '--name-only', '-r', sanitizedSha]);
+  return output ? output.split('\n').filter(f => f.length > 0) : [];
+}
+
+/**
+ * Get files changed in the PR, excluding files from commits that contain the skip keyword
+ * @param {string} skipKeyword - The keyword to look for in commit messages
+ * @returns {Promise<{files: string[], skippedCommits: number, totalCommits: number}>}
+ */
+export async function getChangedFilesWithSkipSupport(skipKeyword) {
+  const commits = await getCommitsWithMessages();
+
+  if (commits.length === 0) {
+    return { files: [], skippedCommits: 0, totalCommits: 0 };
+  }
+
+  const filesFromNonSkippedCommits = new Set();
+  let skippedCommits = 0;
+
+  for (const commit of commits) {
+    const shouldSkip = skipKeyword && commit.message.includes(skipKeyword);
+
+    if (shouldSkip) {
+      skippedCommits++;
+      logMessage(`⏭️  Skipping commit ${commit.sha.substring(0, 7)}: "${commit.message}"`, 'debug');
+    } else {
+      const files = await getFilesForCommit(commit.sha);
+      for (const f of files) {
+        filesFromNonSkippedCommits.add(f);
+      }
+    }
+  }
+
+  return {
+    files: [...filesFromNonSkippedCommits],
+    skippedCommits,
+    totalCommits: commits.length
+  };
+}
+
+/**
  * Check if a single file is relevant for version checking (excluding test files)
  */
 export function isRelevantFile(file) {
@@ -443,9 +536,12 @@ function areAllChangesDevDependencies(baseLock, headLock, changedKeys) {
 /**
  * Check if package files have actual dependency changes (not just metadata changes)
  * This covers both package.json and package-lock.json files
+ * @param {string[]|null} changedFiles - Optional list of changed files to filter which package files to check.
+ *                                        If provided, only checks package files present in this list.
+ *                                        If null/undefined, checks all package files that differ between base and head.
  * @returns {Promise<{hasChanges: boolean, onlyDevDependencies: boolean}>} Object indicating if there are changes and if they're dev-only
  */
-export async function hasPackageDependencyChanges() {
+export async function hasPackageDependencyChanges(changedFiles = null) {
   try {
     const context = github.context;
     if (context.eventName !== 'pull_request') {
@@ -462,6 +558,17 @@ export async function hasPackageDependencyChanges() {
     const sanitizedBaseRef = sanitizeSHA(baseRef, 'baseRef');
     const sanitizedHeadRef = sanitizeSHA(headRef, 'headRef');
 
+    // Determine which package files to check based on changedFiles filter
+    const shouldCheckPackageJson =
+      changedFiles === null || changedFiles.some(f => path.basename(f) === PACKAGE_JSON_FILENAME);
+    const shouldCheckPackageLock =
+      changedFiles === null || changedFiles.some(f => path.basename(f) === PACKAGE_LOCK_JSON_FILENAME);
+
+    if (!shouldCheckPackageJson && !shouldCheckPackageLock) {
+      logMessage('Debug: No package files in changed files list, skipping package dependency check', 'debug');
+      return { hasChanges: false, onlyDevDependencies: false };
+    }
+
     // Get configuration for dev dependencies
     const includeDevDependencies = core.getBooleanInput('include-dev-dependencies');
     logMessage(`Debug: include-dev-dependencies setting: ${includeDevDependencies}`, 'debug');
@@ -470,114 +577,118 @@ export async function hasPackageDependencyChanges() {
     let hasAnyDevChanges = false;
 
     // Check package.json for dependency changes using proper JSON parsing
-    const basePackageJsonRaw = await getFileAtRef(PACKAGE_JSON_FILENAME, sanitizedBaseRef);
-    const headPackageJsonRaw = await getFileAtRef(PACKAGE_JSON_FILENAME, sanitizedHeadRef);
+    if (shouldCheckPackageJson) {
+      const basePackageJsonRaw = await getFileAtRef(PACKAGE_JSON_FILENAME, sanitizedBaseRef);
+      const headPackageJsonRaw = await getFileAtRef(PACKAGE_JSON_FILENAME, sanitizedHeadRef);
 
-    if (basePackageJsonRaw && headPackageJsonRaw) {
-      try {
-        const basePackageJson = JSON.parse(basePackageJsonRaw);
-        const headPackageJson = JSON.parse(headPackageJsonRaw);
+      if (basePackageJsonRaw && headPackageJsonRaw) {
+        try {
+          const basePackageJson = JSON.parse(basePackageJsonRaw);
+          const headPackageJson = JSON.parse(headPackageJsonRaw);
 
-        // Check production dependency sections
-        const productionSections = [
-          'dependencies',
-          'peerDependencies',
-          'optionalDependencies',
-          'bundleDependencies',
-          'bundledDependencies'
-        ];
+          // Check production dependency sections
+          const productionSections = [
+            'dependencies',
+            'peerDependencies',
+            'optionalDependencies',
+            'bundleDependencies',
+            'bundledDependencies'
+          ];
 
-        // Check if any production dependencies changed
-        for (const section of productionSections) {
-          if (!deepEqual(basePackageJson[section], headPackageJson[section])) {
-            logMessage(`Debug: package.json production dependency change detected in section: ${section}`, 'debug');
-            hasProductionChanges = true;
-            break;
+          // Check if any production dependencies changed
+          for (const section of productionSections) {
+            if (!deepEqual(basePackageJson[section], headPackageJson[section])) {
+              logMessage(`Debug: package.json production dependency change detected in section: ${section}`, 'debug');
+              hasProductionChanges = true;
+              break;
+            }
           }
-        }
 
-        // Check if devDependencies changed
-        if (!deepEqual(basePackageJson.devDependencies, headPackageJson.devDependencies)) {
-          hasAnyDevChanges = true;
-          if (includeDevDependencies) {
-            logMessage(
-              'Debug: package.json devDependencies change detected (include-dev-dependencies is true)',
-              'debug'
-            );
-            hasProductionChanges = true;
-          } else {
-            logMessage('Debug: Only devDependencies changed in package.json', 'debug');
+          // Check if devDependencies changed
+          if (!deepEqual(basePackageJson.devDependencies, headPackageJson.devDependencies)) {
+            hasAnyDevChanges = true;
+            if (includeDevDependencies) {
+              logMessage(
+                'Debug: package.json devDependencies change detected (include-dev-dependencies is true)',
+                'debug'
+              );
+              hasProductionChanges = true;
+            } else {
+              logMessage('Debug: Only devDependencies changed in package.json', 'debug');
+            }
           }
+        } catch (error) {
+          // If JSON parsing fails, conservatively assume a change
+          logMessage(`Warning: Could not parse package.json for comparison: ${error.message}`, 'warning');
+          return { hasChanges: true, onlyDevDependencies: false };
         }
-      } catch (error) {
-        // If JSON parsing fails, conservatively assume a change
-        logMessage(`Warning: Could not parse package.json for comparison: ${error.message}`, 'warning');
+      } else if (basePackageJsonRaw !== headPackageJsonRaw) {
+        // One exists and the other doesn't
         return { hasChanges: true, onlyDevDependencies: false };
       }
-    } else if (basePackageJsonRaw !== headPackageJsonRaw) {
-      // One exists and the other doesn't
-      return { hasChanges: true, onlyDevDependencies: false };
     }
 
     // Check package-lock.json for actual dependency changes
-    const basePackageLockRaw = await getFileAtRef(PACKAGE_LOCK_JSON_FILENAME, sanitizedBaseRef);
-    const headPackageLockRaw = await getFileAtRef(PACKAGE_LOCK_JSON_FILENAME, sanitizedHeadRef);
+    if (shouldCheckPackageLock) {
+      const basePackageLockRaw = await getFileAtRef(PACKAGE_LOCK_JSON_FILENAME, sanitizedBaseRef);
+      const headPackageLockRaw = await getFileAtRef(PACKAGE_LOCK_JSON_FILENAME, sanitizedHeadRef);
 
-    if (basePackageLockRaw && headPackageLockRaw) {
-      try {
-        const baseLock = JSON.parse(basePackageLockRaw);
-        const headLock = JSON.parse(headPackageLockRaw);
+      if (basePackageLockRaw && headPackageLockRaw) {
+        try {
+          const baseLock = JSON.parse(basePackageLockRaw);
+          const headLock = JSON.parse(headPackageLockRaw);
 
-        // Check for changes in dependencies object (npm v6 and earlier)
-        const dependenciesChanged = !deepEqual(baseLock.dependencies, headLock.dependencies);
+          // Check for changes in dependencies object (npm v6 and earlier)
+          const dependenciesChanged = !deepEqual(baseLock.dependencies, headLock.dependencies);
 
-        // Check for changes in packages object (npm v7+)
-        const packagesChanged = !deepEqual(baseLock.packages, headLock.packages);
+          // Check for changes in packages object (npm v7+)
+          const packagesChanged = !deepEqual(baseLock.packages, headLock.packages);
 
-        if (dependenciesChanged || packagesChanged) {
-          logMessage('Debug: package-lock.json has changes', 'debug');
+          if (dependenciesChanged || packagesChanged) {
+            logMessage('Debug: package-lock.json has changes', 'debug');
 
-          // Determine which packages changed (excluding metadata-only changes)
-          let changedKeys = new Set();
+            // Determine which packages changed (excluding metadata-only changes)
+            let changedKeys = new Set();
 
-          if (packagesChanged) {
-            changedKeys = getChangedPackageKeys(baseLock.packages, headLock.packages);
-          } else if (dependenciesChanged) {
-            changedKeys = getChangedPackageKeys(baseLock.dependencies, headLock.dependencies);
-          }
+            if (packagesChanged) {
+              changedKeys = getChangedPackageKeys(baseLock.packages, headLock.packages);
+            } else if (dependenciesChanged) {
+              changedKeys = getChangedPackageKeys(baseLock.dependencies, headLock.dependencies);
+            }
 
-          // If no actual changes after filtering out metadata-only changes, skip
-          if (changedKeys.size === 0) {
-            logMessage('Debug: package-lock.json changes were metadata-only, skipping', 'debug');
-          } else {
-            // Check if all changes are dev dependencies only
-            const allChangesAreDevOnly = areAllChangesDevDependencies(baseLock, headLock, changedKeys);
-
-            if (allChangesAreDevOnly) {
-              hasAnyDevChanges = true;
-              if (includeDevDependencies) {
-                logMessage(
-                  'Debug: package-lock.json devDependencies change detected (include-dev-dependencies is true)',
-                  'debug'
-                );
-                hasProductionChanges = true;
-              } else {
-                logMessage('Debug: Only devDependencies changed in package-lock.json', 'debug');
-              }
+            // If no actual changes after filtering out metadata-only changes, skip
+            if (changedKeys.size === 0) {
+              logMessage('Debug: package-lock.json changes were metadata-only, skipping', 'debug');
             } else {
-              logMessage('Debug: package-lock.json has production dependency changes', 'debug');
-              hasProductionChanges = true;
+              // Check if all changes are dev dependencies only
+              const allChangesAreDevOnly = areAllChangesDevDependencies(baseLock, headLock, changedKeys);
+
+              if (allChangesAreDevOnly) {
+                hasAnyDevChanges = true;
+                if (includeDevDependencies) {
+                  logMessage(
+                    'Debug: package-lock.json devDependencies change detected (include-dev-dependencies is true)',
+                    'debug'
+                  );
+                  hasProductionChanges = true;
+                } else {
+                  logMessage('Debug: Only devDependencies changed in package-lock.json', 'debug');
+                }
+              } else {
+                logMessage('Debug: package-lock.json has production dependency changes', 'debug');
+                hasProductionChanges = true;
+              }
             }
           }
+        } catch (error) {
+          // If JSON parsing fails, conservatively assume a change
+          logMessage(`Warning: Could not parse package-lock.json for comparison: ${error.message}`, 'warning');
+          return { hasChanges: true, onlyDevDependencies: false };
         }
-      } catch (error) {
-        // If JSON parsing fails, conservatively assume a change
-        logMessage(`Warning: Could not parse package-lock.json for comparison: ${error.message}`, 'warning');
+      } else if (basePackageLockRaw !== headPackageLockRaw) {
+        // One exists and the other doesn't
         return { hasChanges: true, onlyDevDependencies: false };
       }
-    } else if (basePackageLockRaw !== headPackageLockRaw) {
-      // One exists and the other doesn't
-      return { hasChanges: true, onlyDevDependencies: false };
     }
 
     // Return result based on what we found
@@ -721,10 +832,14 @@ export async function run() {
     const packagePath = core.getInput('package-path') || 'package.json';
     const tagPrefix = core.getInput('tag-prefix') || 'v';
     const skipFilesCheck = core.getInput('skip-files-check') === 'true';
+    const skipVersionKeyword = core.getInput('skip-version-keyword') || DEFAULT_SKIP_KEYWORD;
 
     logMessage(`Package path: ${packagePath}`);
     logMessage(`Tag prefix: ${tagPrefix}`);
     logMessage(`Skip files check: ${skipFilesCheck}`);
+    if (skipVersionKeyword) {
+      logMessage(`Skip version keyword: ${skipVersionKeyword}`);
+    }
 
     // This action only works on pull request events
     if (github.context.eventName !== 'pull_request') {
@@ -746,14 +861,27 @@ export async function run() {
     if (!skipFilesCheck) {
       logMessage('📁 Checking files changed in PR...');
 
-      const changedFiles = await getChangedFiles();
+      // Get changed files, respecting skip-version-keyword in commit messages
+      let changedFiles;
+      if (skipVersionKeyword) {
+        const result = await getChangedFilesWithSkipSupport(skipVersionKeyword);
+        changedFiles = result.files;
+        if (result.skippedCommits > 0) {
+          logMessage(
+            `⏭️  Skipped ${result.skippedCommits} of ${result.totalCommits} commits containing "${skipVersionKeyword}"`,
+            'notice'
+          );
+        }
+      } else {
+        changedFiles = await getChangedFiles();
+      }
       logMessage(`Files changed: ${changedFiles.join(', ')}`);
 
       // Check for regular relevant file changes (JS/TS files, package-lock.json)
       const hasRegularChanges = hasRelevantFileChanges(changedFiles);
 
       // Check specifically for package dependency changes (package.json and package-lock.json)
-      const packageDepResult = await hasPackageDependencyChanges();
+      const packageDepResult = await hasPackageDependencyChanges(changedFiles);
       const hasPackageDepChanges = packageDepResult.hasChanges;
       const onlyDevDependencies = packageDepResult.onlyDevDependencies;
 
