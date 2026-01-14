@@ -111,6 +111,7 @@ jobs:
 | `skip-files-check`         | Skip checking if JS/package files changed (always run version check)                             | No       | `false`          |
 | `include-dev-dependencies` | Whether devDependency changes should trigger version bump requirement                            | No       | `false`          |
 | `skip-version-keyword`     | Keyword in commit messages to skip version check for that commit's files. Set to `''` to disable | No       | `[skip version]` |
+| `token`                    | GitHub token for API access (required for `skip-version-keyword` to analyze commits)             | No       | `github.token`   |
 
 ## 📤 Outputs
 

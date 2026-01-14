@@ -271,11 +271,12 @@ export async function getCommitsWithMessages(token) {
 
   try {
     const octokit = github.getOctokit(token);
-    const { data: commits } = await octokit.rest.pulls.listCommits({
+    // Use pagination to handle PRs with more than 100 commits
+    const commits = await octokit.paginate(octokit.rest.pulls.listCommits, {
       owner: context.repo.owner,
       repo: context.repo.repo,
       pull_number: prNumber,
-      per_page: 100 // Handle PRs with many commits
+      per_page: 100
     });
 
     logMessage(`📋 Found ${commits.length} commits in PR`, 'debug');
@@ -299,15 +300,20 @@ export async function getCommitsWithMessages(token) {
  * @returns {Promise<string[]>} Array of file paths changed in the commit
  */
 export async function getFilesForCommit(sha, octokit, owner, repo) {
-  const sanitizedSha = sanitizeSHA(sha, 'commitSha');
+  try {
+    const sanitizedSha = sanitizeSHA(sha, 'commitSha');
 
-  const { data: commit } = await octokit.rest.repos.getCommit({
-    owner,
-    repo,
-    ref: sanitizedSha
-  });
+    const { data: commit } = await octokit.rest.repos.getCommit({
+      owner,
+      repo,
+      ref: sanitizedSha
+    });
 
-  return commit.files ? commit.files.map(f => f.filename) : [];
+    return commit.files ? commit.files.map(f => f.filename) : [];
+  } catch (error) {
+    logMessage(`⚠️  Could not fetch files for commit ${sha.substring(0, 7)}: ${error.message}`, 'warning');
+    return [];
+  }
 }
 
 /**
