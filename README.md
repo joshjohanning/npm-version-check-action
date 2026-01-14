@@ -15,6 +15,7 @@ This action prevents developers from forgetting to bump package.json version bef
 - 🎯 **Smart file detection** - Only runs when JavaScript/TypeScript/package files are modified
 - 🧠 **Intelligent dependency checking** - Distinguishes between actual dependency changes vs metadata-only changes in package.json and package-lock.json
 - 🔧 **Configurable devDependencies handling** - Choose whether devDependency changes should trigger version bumps
+- ⏭️ **Per-commit skip support** - Use `[skip version]` in commit messages to exclude specific commits from version checking
 - 📊 **Semantic versioning validation** - Ensures new version is higher than previous release
 - 🏷️ **Git tag comparison** - Compares against the latest git tag
 - 🚀 **Shallow clone compatible** - Automatically fetches tags, works with default checkout
@@ -103,12 +104,14 @@ jobs:
 
 ## 📥 Inputs
 
-| Input                      | Description                                                           | Required | Default        |
-| -------------------------- | --------------------------------------------------------------------- | -------- | -------------- |
-| `package-path`             | Path to package.json file (relative to repository root)               | No       | `package.json` |
-| `tag-prefix`               | Prefix for version tags (e.g., "v" for v1.0.0)                        | No       | `v`            |
-| `skip-files-check`         | Skip checking if JS/package files changed (always run version check)  | No       | `false`        |
-| `include-dev-dependencies` | Whether devDependency changes should trigger version bump requirement | No       | `false`        |
+| Input                      | Description                                                                                      | Required | Default               |
+| -------------------------- | ------------------------------------------------------------------------------------------------ | -------- | --------------------- |
+| `package-path`             | Path to package.json file (relative to repository root)                                          | No       | `package.json`        |
+| `tag-prefix`               | Prefix for version tags (e.g., "v" for v1.0.0)                                                   | No       | `v`                   |
+| `skip-files-check`         | Skip checking if JS/package files changed (always run version check)                             | No       | `false`               |
+| `include-dev-dependencies` | Whether devDependency changes should trigger version bump requirement                            | No       | `false`               |
+| `skip-version-keyword`     | Keyword in commit messages to skip version check for that commit's files. Set to `''` to disable | No       | `[skip version]`      |
+| `token`                    | GitHub token for API access (required for `skip-version-keyword` to analyze commits)             | No       | `${{ github.token }}` |
 
 ## 📤 Outputs
 
@@ -263,6 +266,54 @@ For libraries where build tools/devDependencies can affect the published package
 - **Library packages**: Where build tools, bundlers, or transpilers can affect the final output
 - **Strict versioning policies**: Teams that want every dependency change tracked
 - **CI/CD sensitive packages**: Where test runners or build scripts changes impact deliverables
+
+### Skip Version Check for Specific Commits
+
+Sometimes you need to make changes that shouldn't require a version bump - like fixing a typo in a comment, updating JSDoc, or fixing linting issues. You can use the `[skip version]` keyword in your commit message to exclude that commit's files from version checking:
+
+```bash
+# This commit's files will be excluded from version check
+git commit -m "docs: fix typo in JSDoc comment [skip version]"
+
+# This commit's files will still be checked
+git commit -m "feat: add new feature"
+```
+
+#### How It Works
+
+The action analyzes each commit in the PR individually:
+
+1. Commits **with** `[skip version]` in the message → files are **excluded** from version check
+2. Commits **without** the keyword → files are **included** in version check
+3. If a file is changed in **both** skipped and non-skipped commits → file is **included** (requires version bump)
+
+#### Example Scenario
+
+```
+PR with 3 commits:
+├── Commit A: "docs: fix typos [skip version]" → changes src/index.js
+├── Commit B: "feat: add feature" → changes src/utils.js
+└── Commit C: "fix: typo" → changes src/index.js (same file as A)
+
+Result: src/index.js and src/utils.js both require version check
+        (index.js because it's changed in non-skipped Commit C)
+```
+
+#### Custom Skip Keyword
+
+You can customize the skip keyword or disable this feature entirely:
+
+```yaml
+# Use a custom keyword
+- uses: joshjohanning/npm-version-check-action@v1
+  with:
+    skip-version-keyword: '[no bump]'
+
+# Disable skip functionality entirely
+- uses: joshjohanning/npm-version-check-action@v1
+  with:
+    skip-version-keyword: ''
+```
 
 ## 🔍 Troubleshooting
 

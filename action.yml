@@ -22,6 +22,14 @@ inputs:
     description: 'Whether devDependency changes should trigger version bump requirement. Default (false) ignores devDependencies changes and skips package-lock.json analysis when only devDeps change, preventing false positives from dev dependency lock file updates'
     required: false
     default: 'false'
+  skip-version-keyword:
+    description: 'Keyword in commit messages to skip version check for that commit. Files changed in commits containing this keyword are excluded from the version check. Set to empty string to disable.'
+    required: false
+    default: '[skip version]'
+  token:
+    description: 'GitHub token for API access. Required for skip-version-keyword feature to work with shallow clones.'
+    required: false
+    default: ${{ github.token }}
 
 outputs:
   version-changed:
