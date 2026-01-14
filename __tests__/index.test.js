@@ -29,6 +29,18 @@ const mockExec = {
   exec: jest.fn()
 };
 
+// Mock Octokit methods
+const mockOctokit = {
+  rest: {
+    pulls: {
+      listCommits: jest.fn()
+    },
+    repos: {
+      getCommit: jest.fn()
+    }
+  }
+};
+
 // Mock @actions/github
 const mockGithub = {
   context: {
@@ -38,10 +50,16 @@ const mockGithub = {
       pull_request: {
         base: {
           sha: TEST_BASE_SHA
-        }
+        },
+        number: 123
       }
+    },
+    repo: {
+      owner: 'test-owner',
+      repo: 'test-repo'
     }
-  }
+  },
+  getOctokit: jest.fn(() => mockOctokit)
 };
 
 // Mock semver
@@ -72,17 +90,9 @@ function createExecMock(basePackageJson, headPackageJson, basePackageLock, headP
     if (args.includes('fetch') && args.includes('--tags')) {
       output = '';
     }
-    // Handle getChangedFiles calls (legacy)
+    // Handle getChangedFiles calls
     else if (args.includes('diff') && args.includes('--name-only')) {
       output = '';
-    }
-    // Handle getCommitsWithMessages calls (git log --format=%H %s)
-    else if (args.includes('log') && args.includes('--format=%H %s')) {
-      output = ''; // Default: no commits
-    }
-    // Handle getFilesForCommit calls (git diff-tree)
-    else if (args.includes('diff-tree') && args.includes('--no-commit-id')) {
-      output = ''; // Default: no files
     }
     // Handle package.json file retrieval
     else if (args.includes('show') && args.includes(`${TEST_BASE_SHA}:package.json`)) {
@@ -1834,26 +1844,34 @@ describe('npm Version Check Action - Integration Tests', () => {
     beforeEach(() => {
       mockGithub.context.eventName = 'pull_request';
       mockGithub.context.sha = TEST_HEAD_SHA;
-      mockGithub.context.payload.pull_request = { base: { sha: TEST_BASE_SHA } };
+      mockGithub.context.payload.pull_request = { base: { sha: TEST_BASE_SHA }, number: 123 };
+      mockGithub.context.repo = { owner: 'test-owner', repo: 'test-repo' };
     });
 
-    test('should return commits with their messages', async () => {
+    test('should return commits with their messages using GitHub API', async () => {
       const { getCommitsWithMessages } = indexModule;
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('log') && args.includes('--format=%H %s')) {
-          options.listeners.stdout(
-            'abc1234567890abcdef1234567890abcdef1234 Add feature\ndef4567890abcdef1234567890abcdef123456 Fix bug'
-          );
-        }
-        return 0;
+      mockOctokit.rest.pulls.listCommits.mockResolvedValue({
+        data: [
+          {
+            sha: 'abc1234567890abcdef1234567890abcdef1234',
+            commit: { message: 'Add feature\n\nDetailed description' }
+          },
+          { sha: 'def4567890abcdef1234567890abcdef123456', commit: { message: 'Fix bug' } }
+        ]
       });
 
-      const commits = await getCommitsWithMessages();
+      const commits = await getCommitsWithMessages('test-token');
 
       expect(commits).toHaveLength(2);
       expect(commits[0]).toEqual({ sha: 'abc1234567890abcdef1234567890abcdef1234', message: 'Add feature' });
       expect(commits[1]).toEqual({ sha: 'def4567890abcdef1234567890abcdef123456', message: 'Fix bug' });
+      expect(mockOctokit.rest.pulls.listCommits).toHaveBeenCalledWith({
+        owner: 'test-owner',
+        repo: 'test-repo',
+        pull_number: 123,
+        per_page: 100
+      });
     });
 
     test('should return empty array for non-pull request events', async () => {
@@ -1861,48 +1879,58 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockGithub.context.eventName = 'push';
 
-      const commits = await getCommitsWithMessages();
+      const commits = await getCommitsWithMessages('test-token');
       expect(commits).toEqual([]);
     });
 
-    test('should handle empty output', async () => {
+    test('should return empty array when API returns no commits', async () => {
       const { getCommitsWithMessages } = indexModule;
 
-      mockExec.exec.mockImplementation(async (_command, _args, _options) => {
-        // Don't call stdout listener - simulates empty output
-        return 0;
-      });
+      mockOctokit.rest.pulls.listCommits.mockResolvedValue({ data: [] });
 
-      const commits = await getCommitsWithMessages();
+      const commits = await getCommitsWithMessages('test-token');
       expect(commits).toEqual([]);
     });
   });
 
   describe('getFilesForCommit function', () => {
-    test('should return files changed in a commit', async () => {
+    test('should return files changed in a commit using GitHub API', async () => {
       const { getFilesForCommit } = indexModule;
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('diff-tree')) {
-          options.listeners.stdout('src/index.js\nlib/utils.ts\npackage.json');
+      mockOctokit.rest.repos.getCommit.mockResolvedValue({
+        data: {
+          files: [{ filename: 'src/index.js' }, { filename: 'lib/utils.ts' }, { filename: 'package.json' }]
         }
-        return 0;
       });
 
-      const files = await getFilesForCommit('abc1234567890abcdef1234567890abcdef1234');
+      const files = await getFilesForCommit(
+        'abc1234567890abcdef1234567890abcdef1234',
+        mockOctokit,
+        'test-owner',
+        'test-repo'
+      );
 
       expect(files).toEqual(['src/index.js', 'lib/utils.ts', 'package.json']);
+      expect(mockOctokit.rest.repos.getCommit).toHaveBeenCalledWith({
+        owner: 'test-owner',
+        repo: 'test-repo',
+        ref: 'abc1234567890abcdef1234567890abcdef1234'
+      });
     });
 
-    test('should return empty array for no changes', async () => {
+    test('should return empty array for commit with no files', async () => {
       const { getFilesForCommit } = indexModule;
 
-      mockExec.exec.mockImplementation(async (_command, _args, _options) => {
-        // Don't call stdout listener - simulates empty output
-        return 0;
+      mockOctokit.rest.repos.getCommit.mockResolvedValue({
+        data: { files: null }
       });
 
-      const files = await getFilesForCommit('abc1234567890abcdef1234567890abcdef1234');
+      const files = await getFilesForCommit(
+        'abc1234567890abcdef1234567890abcdef1234',
+        mockOctokit,
+        'test-owner',
+        'test-repo'
+      );
       expect(files).toEqual([]);
     });
   });
@@ -1911,26 +1939,31 @@ describe('npm Version Check Action - Integration Tests', () => {
     beforeEach(() => {
       mockGithub.context.eventName = 'pull_request';
       mockGithub.context.sha = TEST_HEAD_SHA;
-      mockGithub.context.payload.pull_request = { base: { sha: TEST_BASE_SHA } };
+      mockGithub.context.payload.pull_request = { base: { sha: TEST_BASE_SHA }, number: 123 };
+      mockGithub.context.repo = { owner: 'test-owner', repo: 'test-repo' };
     });
 
     test('should exclude files from commits with skip keyword', async () => {
       const { getChangedFilesWithSkipSupport } = indexModule;
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('log') && args.includes('--format=%H %s')) {
-          options.listeners.stdout(
-            'abc1234567890abcdef1234567890abcdef1234 [skip version] Fix typo\ndef4567890abcdef1234567890abcdef123456 Add feature'
-          );
-        } else if (args.includes('diff-tree') && args[4] === 'abc1234567890abcdef1234567890abcdef1234') {
-          options.listeners.stdout('src/index.js'); // This should be skipped
-        } else if (args.includes('diff-tree') && args[4] === 'def4567890abcdef1234567890abcdef123456') {
-          options.listeners.stdout('src/utils.js\nlib/helper.ts');
-        }
-        return 0;
+      mockOctokit.rest.pulls.listCommits.mockResolvedValue({
+        data: [
+          { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: '[skip version] Fix typo' } },
+          { sha: 'def4567890abcdef1234567890abcdef123456', commit: { message: 'Add feature' } }
+        ]
       });
 
-      const result = await getChangedFilesWithSkipSupport('[skip version]');
+      mockOctokit.rest.repos.getCommit.mockImplementation(({ ref }) => {
+        if (ref === 'def4567890abcdef1234567890abcdef123456') {
+          return Promise.resolve({
+            data: { files: [{ filename: 'src/utils.js' }, { filename: 'lib/helper.ts' }] }
+          });
+        }
+        // Should not be called for skipped commit
+        return Promise.resolve({ data: { files: [] } });
+      });
+
+      const result = await getChangedFilesWithSkipSupport('[skip version]', 'test-token');
 
       expect(result.files).toEqual(['src/utils.js', 'lib/helper.ts']);
       expect(result.skippedCommits).toBe(1);
@@ -1940,20 +1973,23 @@ describe('npm Version Check Action - Integration Tests', () => {
     test('should include all files when no commits have skip keyword', async () => {
       const { getChangedFilesWithSkipSupport } = indexModule;
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('log') && args.includes('--format=%H %s')) {
-          options.listeners.stdout(
-            'abc1234567890abcdef1234567890abcdef1234 Add feature\ndef4567890abcdef1234567890abcdef123456 Fix bug'
-          );
-        } else if (args.includes('diff-tree') && args[4] === 'abc1234567890abcdef1234567890abcdef1234') {
-          options.listeners.stdout('src/index.js');
-        } else if (args.includes('diff-tree') && args[4] === 'def4567890abcdef1234567890abcdef123456') {
-          options.listeners.stdout('src/utils.js');
-        }
-        return 0;
+      mockOctokit.rest.pulls.listCommits.mockResolvedValue({
+        data: [
+          { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add feature' } },
+          { sha: 'def4567890abcdef1234567890abcdef123456', commit: { message: 'Fix bug' } }
+        ]
       });
 
-      const result = await getChangedFilesWithSkipSupport('[skip version]');
+      mockOctokit.rest.repos.getCommit.mockImplementation(({ ref }) => {
+        if (ref === 'abc1234567890abcdef1234567890abcdef1234') {
+          return Promise.resolve({ data: { files: [{ filename: 'src/index.js' }] } });
+        } else if (ref === 'def4567890abcdef1234567890abcdef123456') {
+          return Promise.resolve({ data: { files: [{ filename: 'src/utils.js' }] } });
+        }
+        return Promise.resolve({ data: { files: [] } });
+      });
+
+      const result = await getChangedFilesWithSkipSupport('[skip version]', 'test-token');
 
       expect(result.files).toContain('src/index.js');
       expect(result.files).toContain('src/utils.js');
@@ -1964,14 +2000,11 @@ describe('npm Version Check Action - Integration Tests', () => {
     test('should return empty files when all commits are skipped', async () => {
       const { getChangedFilesWithSkipSupport } = indexModule;
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('log') && args.includes('--format=%H %s')) {
-          options.listeners.stdout('abc1234567890abcdef1234567890abcdef1234 [skip version] Fix typo');
-        }
-        return 0;
+      mockOctokit.rest.pulls.listCommits.mockResolvedValue({
+        data: [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: '[skip version] Fix typo' } }]
       });
 
-      const result = await getChangedFilesWithSkipSupport('[skip version]');
+      const result = await getChangedFilesWithSkipSupport('[skip version]', 'test-token');
 
       expect(result.files).toEqual([]);
       expect(result.skippedCommits).toBe(1);
@@ -1981,20 +2014,23 @@ describe('npm Version Check Action - Integration Tests', () => {
     test('should deduplicate files changed in multiple commits', async () => {
       const { getChangedFilesWithSkipSupport } = indexModule;
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('log') && args.includes('--format=%H %s')) {
-          options.listeners.stdout(
-            'abc1234567890abcdef1234567890abcdef1234 Add feature\ndef4567890abcdef1234567890abcdef123456 Fix bug'
-          );
-        } else if (args.includes('diff-tree') && args[4] === 'abc1234567890abcdef1234567890abcdef1234') {
-          options.listeners.stdout('src/index.js\nsrc/utils.js');
-        } else if (args.includes('diff-tree') && args[4] === 'def4567890abcdef1234567890abcdef123456') {
-          options.listeners.stdout('src/index.js'); // Same file as in first commit
-        }
-        return 0;
+      mockOctokit.rest.pulls.listCommits.mockResolvedValue({
+        data: [
+          { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add feature' } },
+          { sha: 'def4567890abcdef1234567890abcdef123456', commit: { message: 'Fix bug' } }
+        ]
       });
 
-      const result = await getChangedFilesWithSkipSupport('[skip version]');
+      mockOctokit.rest.repos.getCommit.mockImplementation(({ ref }) => {
+        if (ref === 'abc1234567890abcdef1234567890abcdef1234') {
+          return Promise.resolve({ data: { files: [{ filename: 'src/index.js' }, { filename: 'src/utils.js' }] } });
+        } else if (ref === 'def4567890abcdef1234567890abcdef123456') {
+          return Promise.resolve({ data: { files: [{ filename: 'src/index.js' }] } }); // Same file as in first commit
+        }
+        return Promise.resolve({ data: { files: [] } });
+      });
+
+      const result = await getChangedFilesWithSkipSupport('[skip version]', 'test-token');
 
       // Should contain only unique files
       expect(result.files).toHaveLength(2);
@@ -2005,20 +2041,22 @@ describe('npm Version Check Action - Integration Tests', () => {
     test('should include file if changed in both skipped and non-skipped commits', async () => {
       const { getChangedFilesWithSkipSupport } = indexModule;
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('log') && args.includes('--format=%H %s')) {
-          options.listeners.stdout(
-            'abc1234567890abcdef1234567890abcdef1234 [skip version] Fix typo in index\ndef4567890abcdef1234567890abcdef123456 Add feature to index'
-          );
-        } else if (args.includes('diff-tree') && args[4] === 'abc1234567890abcdef1234567890abcdef1234') {
-          options.listeners.stdout('src/index.js'); // Skipped commit changes this
-        } else if (args.includes('diff-tree') && args[4] === 'def4567890abcdef1234567890abcdef123456') {
-          options.listeners.stdout('src/index.js'); // Non-skipped commit also changes this
-        }
-        return 0;
+      mockOctokit.rest.pulls.listCommits.mockResolvedValue({
+        data: [
+          { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: '[skip version] Fix typo in index' } },
+          { sha: 'def4567890abcdef1234567890abcdef123456', commit: { message: 'Add feature to index' } }
+        ]
       });
 
-      const result = await getChangedFilesWithSkipSupport('[skip version]');
+      mockOctokit.rest.repos.getCommit.mockImplementation(({ ref }) => {
+        // Only the non-skipped commit should have files retrieved
+        if (ref === 'def4567890abcdef1234567890abcdef123456') {
+          return Promise.resolve({ data: { files: [{ filename: 'src/index.js' }] } }); // Non-skipped commit changes this
+        }
+        return Promise.resolve({ data: { files: [] } });
+      });
+
+      const result = await getChangedFilesWithSkipSupport('[skip version]', 'test-token');
 
       // File should be included because it was changed in a non-skipped commit
       expect(result.files).toContain('src/index.js');
@@ -2029,14 +2067,9 @@ describe('npm Version Check Action - Integration Tests', () => {
     test('should return empty when no commits in PR', async () => {
       const { getChangedFilesWithSkipSupport } = indexModule;
 
-      mockExec.exec.mockImplementation(async (_command, args, _options) => {
-        if (args.includes('log') && args.includes('--format=%H %s')) {
-          // Empty output - no commits
-        }
-        return 0;
-      });
+      mockOctokit.rest.pulls.listCommits.mockResolvedValue({ data: [] });
 
-      const result = await getChangedFilesWithSkipSupport('[skip version]');
+      const result = await getChangedFilesWithSkipSupport('[skip version]', 'test-token');
 
       expect(result.files).toEqual([]);
       expect(result.skippedCommits).toBe(0);
@@ -2102,6 +2135,10 @@ describe('npm Version Check Action - Integration Tests', () => {
             return 'v';
           case 'skip-files-check':
             return 'false';
+          case 'token':
+            return 'test-token';
+          case 'skip-version-keyword':
+            return '[skip version]';
           default:
             return '';
         }
@@ -2112,21 +2149,29 @@ describe('npm Version Check Action - Integration Tests', () => {
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.1.0' }));
 
       mockExec.exec.mockResolvedValue(0);
+
+      // Set up GitHub context for PR
+      mockGithub.context.eventName = 'pull_request';
+      mockGithub.context.sha = TEST_HEAD_SHA;
+      mockGithub.context.payload.pull_request = { base: { sha: TEST_BASE_SHA }, number: 123 };
+      mockGithub.context.repo = { owner: 'test-owner', repo: 'test-repo' };
     });
 
     test('should handle package dependency changes logging', async () => {
       const { run } = indexModule;
 
-      // Mock changed files to include package.json with dependency changes
+      // Mock API responses for commits
+      mockOctokit.rest.pulls.listCommits.mockResolvedValue({
+        data: [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add new feature' } }]
+      });
+
+      mockOctokit.rest.repos.getCommit.mockResolvedValue({
+        data: { files: [{ filename: 'package.json' }, { filename: 'src/index.js' }] }
+      });
+
+      // Mock git commands for package.json diff comparison
       mockExec.exec.mockImplementation(async (command, args, options) => {
-        // Handle git log for getCommitsWithMessages
-        if (args.includes('log') && args.includes('--format=%H %s')) {
-          options.listeners.stdout('abc1234567890 Add new feature');
-        }
-        // Handle git diff-tree for getFilesForCommit
-        else if (args.includes('diff-tree') && args.includes('--no-commit-id')) {
-          options.listeners.stdout('package.json\nsrc/index.js');
-        } else if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:package.json`) {
+        if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:package.json`) {
           options.listeners.stdout('{ "name": "test", "dependencies": { "lodash": "^4.0.0" } }');
         } else if (args.includes('show') && args[1] === `${TEST_HEAD_SHA}:package.json`) {
           options.listeners.stdout('{ "name": "test", "dependencies": { "lodash": "^4.1.0" } }');
@@ -2147,16 +2192,18 @@ describe('npm Version Check Action - Integration Tests', () => {
     test('should handle regular file changes logging', async () => {
       const { run } = indexModule;
 
-      // Mock changed files to include JS files
+      // Mock API responses for commits
+      mockOctokit.rest.pulls.listCommits.mockResolvedValue({
+        data: [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add new feature' } }]
+      });
+
+      mockOctokit.rest.repos.getCommit.mockResolvedValue({
+        data: { files: [{ filename: 'src/index.js' }, { filename: 'lib/utils.ts' }] }
+      });
+
+      // Mock git commands
       mockExec.exec.mockImplementation(async (command, args, options) => {
-        // Handle git log for getCommitsWithMessages
-        if (args.includes('log') && args.includes('--format=%H %s')) {
-          options.listeners.stdout('abc1234567890 Add new feature');
-        }
-        // Handle git diff-tree for getFilesForCommit
-        else if (args.includes('diff-tree') && args.includes('--no-commit-id')) {
-          options.listeners.stdout('src/index.js\nlib/utils.ts');
-        } else if (args.includes('show') && args[1].includes('package.json')) {
+        if (args.includes('show') && args[1].includes('package.json')) {
           options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
         } else if (args.includes('tag')) {
           options.listeners.stdout('v1.0.0');
@@ -2176,16 +2223,18 @@ describe('npm Version Check Action - Integration Tests', () => {
     test('should handle first release scenario', async () => {
       const { run } = indexModule;
 
+      // Mock API responses for commits
+      mockOctokit.rest.pulls.listCommits.mockResolvedValue({
+        data: [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add new feature' } }]
+      });
+
+      mockOctokit.rest.repos.getCommit.mockResolvedValue({
+        data: { files: [{ filename: 'src/index.js' }] }
+      });
+
       // Mock no existing tags
       mockExec.exec.mockImplementation(async (command, args, options) => {
-        // Handle git log for getCommitsWithMessages
-        if (args.includes('log') && args.includes('--format=%H %s')) {
-          options.listeners.stdout('abc1234567890 Add new feature');
-        }
-        // Handle git diff-tree for getFilesForCommit
-        else if (args.includes('diff-tree') && args.includes('--no-commit-id')) {
-          options.listeners.stdout('src/index.js');
-        } else if (args.includes('tag')) {
+        if (args.includes('tag')) {
           options.listeners.stdout(''); // No tags
         }
         return 0;
@@ -2204,15 +2253,17 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.0.0' }));
 
+      // Mock API responses for commits
+      mockOctokit.rest.pulls.listCommits.mockResolvedValue({
+        data: [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add new feature' } }]
+      });
+
+      mockOctokit.rest.repos.getCommit.mockResolvedValue({
+        data: { files: [{ filename: 'src/index.js' }] }
+      });
+
       mockExec.exec.mockImplementation(async (command, args, options) => {
-        // Handle git log for getCommitsWithMessages
-        if (args.includes('log') && args.includes('--format=%H %s')) {
-          options.listeners.stdout('abc1234567890 Add new feature');
-        }
-        // Handle git diff-tree for getFilesForCommit
-        else if (args.includes('diff-tree') && args.includes('--no-commit-id')) {
-          options.listeners.stdout('src/index.js');
-        } else if (args.includes('tag')) {
+        if (args.includes('tag')) {
           options.listeners.stdout('v1.0.0');
         }
         return 0;
@@ -2235,15 +2286,17 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '0.9.0' }));
 
+      // Mock API responses for commits
+      mockOctokit.rest.pulls.listCommits.mockResolvedValue({
+        data: [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add new feature' } }]
+      });
+
+      mockOctokit.rest.repos.getCommit.mockResolvedValue({
+        data: { files: [{ filename: 'src/index.js' }] }
+      });
+
       mockExec.exec.mockImplementation(async (command, args, options) => {
-        // Handle git log for getCommitsWithMessages
-        if (args.includes('log') && args.includes('--format=%H %s')) {
-          options.listeners.stdout('abc1234567890 Add new feature');
-        }
-        // Handle git diff-tree for getFilesForCommit
-        else if (args.includes('diff-tree') && args.includes('--no-commit-id')) {
-          options.listeners.stdout('src/index.js');
-        } else if (args.includes('tag')) {
+        if (args.includes('tag')) {
           options.listeners.stdout('v1.0.0');
         }
         return 0;
@@ -2266,15 +2319,17 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.1.0' }));
 
+      // Mock API responses for commits
+      mockOctokit.rest.pulls.listCommits.mockResolvedValue({
+        data: [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add new feature' } }]
+      });
+
+      mockOctokit.rest.repos.getCommit.mockResolvedValue({
+        data: { files: [{ filename: 'src/index.js' }] }
+      });
+
       mockExec.exec.mockImplementation(async (command, args, options) => {
-        // Handle git log for getCommitsWithMessages
-        if (args.includes('log') && args.includes('--format=%H %s')) {
-          options.listeners.stdout('abc1234567890 Add new feature');
-        }
-        // Handle git diff-tree for getFilesForCommit
-        else if (args.includes('diff-tree') && args.includes('--no-commit-id')) {
-          options.listeners.stdout('src/index.js');
-        } else if (args.includes('tag')) {
+        if (args.includes('tag')) {
           options.listeners.stdout('v1.0.0');
         }
         return 0;
@@ -2298,7 +2353,9 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       await run();
 
-      expect(mockCore.setFailed).toHaveBeenCalledWith('Action failed with error: Git command failed');
+      expect(mockCore.setFailed).toHaveBeenCalledWith(
+        'Action failed with error: Failed to fetch git tags: Git command failed'
+      );
     });
   });
 
