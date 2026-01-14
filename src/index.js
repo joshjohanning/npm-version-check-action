@@ -858,6 +858,8 @@ export async function run() {
     if (skipVersionKeyword) {
       logMessage(`Skip version keyword: ${skipVersionKeyword}`);
     }
+    logMessage(`Token available: ${token ? 'yes' : 'no'}`);
+    logMessage(`Token source: ${core.getInput('token') ? 'input' : process.env.GITHUB_TOKEN ? 'env' : 'none'}`, 'debug');
 
     // This action only works on pull request events
     if (github.context.eventName !== 'pull_request') {
@@ -882,10 +884,12 @@ export async function run() {
       // Get changed files, respecting skip-version-keyword in commit messages
       let changedFiles;
       if (skipVersionKeyword && token) {
+        logMessage(`🔍 Analyzing commits for skip keyword: "${skipVersionKeyword}"`);
         const result = await getChangedFilesWithSkipSupport(skipVersionKeyword, token);
+        logMessage(`📋 Found ${result.totalCommits} commits in PR`);
         // If no commits were found (API error fallback), use regular getChangedFiles
         if (result.totalCommits === 0) {
-          logMessage('ℹ️  Could not analyze individual commits, using standard file diff', 'debug');
+          logMessage('ℹ️  Could not analyze individual commits, using standard file diff');
           changedFiles = await getChangedFiles();
         } else {
           changedFiles = result.files;
@@ -894,6 +898,8 @@ export async function run() {
               `⏭️  Skipped ${result.skippedCommits} of ${result.totalCommits} commits containing "${skipVersionKeyword}"`,
               'notice'
             );
+          } else {
+            logMessage(`ℹ️  No commits contained skip keyword, all ${result.totalCommits} commits included`);
           }
         }
       } else {
