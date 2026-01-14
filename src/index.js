@@ -340,7 +340,7 @@ export async function getChangedFilesWithSkipSupport(skipKeyword, token) {
   // Separate commits into skipped and non-skipped
   const nonSkippedCommits = [];
   for (const commit of commits) {
-    const shouldSkip = skipKeyword && commit.message.includes(skipKeyword);
+    const shouldSkip = skipKeyword && commit.message.toLowerCase().includes(skipKeyword.toLowerCase());
 
     if (shouldSkip) {
       skippedCommits++;

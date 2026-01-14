@@ -2189,6 +2189,38 @@ describe('npm Version Check Action - Integration Tests', () => {
       expect(result.skippedCommits).toBe(2);
       expect(result.totalCommits).toBe(2);
     });
+
+    test('should match skip keyword case-insensitively', async () => {
+      const { getChangedFilesWithSkipSupport } = indexModule;
+
+      mockOctokit.paginate.mockResolvedValue([
+        {
+          sha: 'abc1234567890abcdef1234567890abcdef1234',
+          commit: { message: '[SKIP VERSION] uppercase keyword' }
+        },
+        {
+          sha: 'def4567890abcdef1234567890abcdef123456',
+          commit: { message: '[Skip Version] mixed case keyword' }
+        },
+        {
+          sha: 'ccc7890abcdef1234567890abcdef1234567890',
+          commit: { message: 'feat: add feature' }
+        }
+      ]);
+
+      mockOctokit.rest.repos.getCommit.mockImplementation(({ ref }) => {
+        if (ref === 'ccc7890abcdef1234567890abcdef1234567890') {
+          return Promise.resolve({ data: { files: [{ filename: 'src/feature.js' }] } });
+        }
+        return Promise.resolve({ data: { files: [] } });
+      });
+
+      const result = await getChangedFilesWithSkipSupport('[skip version]', 'test-token');
+
+      expect(result.files).toEqual(['src/feature.js']);
+      expect(result.skippedCommits).toBe(2);
+      expect(result.totalCommits).toBe(3);
+    });
   });
 
   describe('hasPackageDependencyChanges JSON parsing errors', () => {
