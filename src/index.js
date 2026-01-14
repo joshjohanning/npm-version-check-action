@@ -858,11 +858,6 @@ export async function run() {
     if (skipVersionKeyword) {
       logMessage(`Skip version keyword: ${skipVersionKeyword}`);
     }
-    logMessage(`Token available: ${token ? 'yes' : 'no'}`);
-    logMessage(
-      `Token source: ${core.getInput('token') ? 'input' : process.env.GITHUB_TOKEN ? 'env' : 'none'}`,
-      'debug'
-    );
 
     // This action only works on pull request events
     if (github.context.eventName !== 'pull_request') {
