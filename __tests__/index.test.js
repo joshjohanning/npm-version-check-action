@@ -1525,6 +1525,50 @@ describe('hasPackageDependencyChanges', () => {
     // Should return false because only peer metadata changed, no actual dependency changes
     expect(result).toEqual({ hasChanges: false, onlyDevDependencies: false });
   });
+
+  test('should return false when changedFiles array does not contain package files', async () => {
+    const { hasPackageDependencyChanges } = indexModule;
+
+    // Clear any previous mock calls
+    jest.clearAllMocks();
+
+    // Even though there may be actual package.json changes in git,
+    // passing a changedFiles array without package files should skip the check
+    const result = await hasPackageDependencyChanges(['src/index.js', 'lib/utils.ts']);
+
+    // Git commands should NOT be called since no package files in the list
+    expect(mockExec.exec).not.toHaveBeenCalled();
+    expect(result).toEqual({ hasChanges: false, onlyDevDependencies: false });
+  });
+
+  test('should only check package.json when changedFiles contains only package.json', async () => {
+    const { hasPackageDependencyChanges } = indexModule;
+
+    // Clear any previous mock calls
+    jest.clearAllMocks();
+
+    const basePackageJson = {
+      name: 'test-package',
+      version: '1.0.0',
+      dependencies: { express: '^4.18.0' }
+    };
+
+    const headPackageJson = {
+      name: 'test-package',
+      version: '1.0.0',
+      dependencies: { express: '^4.19.0' }
+    };
+
+    mockExec.exec.mockImplementation(createExecMock(basePackageJson, headPackageJson));
+
+    const result = await hasPackageDependencyChanges(['src/index.js', 'package.json']);
+
+    // Should detect changes since package.json is in the list
+    expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false });
+    // Should check package.json
+    expect(mockExec.exec).toHaveBeenCalledWith('git', ['show', `${TEST_BASE_SHA}:package.json`], expect.any(Object));
+    expect(mockExec.exec).toHaveBeenCalledWith('git', ['show', `${TEST_HEAD_SHA}:package.json`], expect.any(Object));
+  });
 });
 
 describe('npm Version Check Action - Integration Tests', () => {
@@ -2501,6 +2545,88 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       expect(mockCore.setFailed).toHaveBeenCalledWith(
         'Action failed with error: Failed to fetch git tags: Git command failed'
+      );
+    });
+
+    test('should skip commit analysis when skip-version-keyword is empty string', async () => {
+      const { run } = indexModule;
+
+      // Override to return empty string for skip-version-keyword
+      mockCore.getInput.mockImplementation(input => {
+        switch (input) {
+          case 'package-path':
+            return 'package.json';
+          case 'tag-prefix':
+            return 'v';
+          case 'skip-files-check':
+            return 'false';
+          case 'token':
+            return 'test-token';
+          case 'skip-version-keyword':
+            return ''; // Empty string disables the feature
+          default:
+            return '';
+        }
+      });
+
+      // Mock git commands for standard file diff (not commit analysis)
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('diff') && args.includes('--name-only')) {
+          options.listeners.stdout('src/index.js\n');
+        } else if (args.includes('tag')) {
+          options.listeners.stdout('v1.0.0');
+        } else if (args.includes('show')) {
+          options.listeners.stdout('{}');
+        }
+        return 0;
+      });
+
+      mockSemver.compare.mockReturnValue(1);
+
+      await run();
+
+      // Should NOT call paginate when skip-version-keyword is empty
+      expect(mockOctokit.paginate).not.toHaveBeenCalled();
+      // Should use standard file diff instead
+      expect(mockCore.info).toHaveBeenCalledWith('📁 Checking files changed in PR...');
+    });
+
+    test('should use standard file diff when all commits contain skip keyword', async () => {
+      const { run } = indexModule;
+
+      // Mock API responses where all commits have skip keyword
+      mockOctokit.paginate.mockResolvedValue([
+        { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Fix [skip version]' } },
+        { sha: 'def5678901234567890abcdef1234567890abcd', commit: { message: 'Update [skip version]' } }
+      ]);
+
+      mockOctokit.rest.repos.getCommit
+        .mockResolvedValueOnce({
+          data: { files: [{ filename: 'src/file1.js' }] }
+        })
+        .mockResolvedValueOnce({
+          data: { files: [{ filename: 'src/file2.ts' }] }
+        });
+
+      // Mock git commands for version check
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('tag')) {
+          options.listeners.stdout('v1.0.0');
+        } else if (args.includes('show')) {
+          options.listeners.stdout('{}');
+        }
+        return 0;
+      });
+
+      mockSemver.compare.mockReturnValue(1);
+
+      await run();
+
+      // Should log that all commits were skipped
+      expect(mockCore.notice).toHaveBeenCalledWith('⏭️  Skipped 2 of 2 commits containing "[skip version]"');
+      // When all files are skipped, changedFiles is empty so no relevant changes detected
+      expect(mockCore.warning).toHaveBeenCalledWith(
+        '⏭️  No JavaScript/TypeScript files or dependency changes detected, skipping version check'
       );
     });
   });

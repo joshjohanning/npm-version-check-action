@@ -866,7 +866,9 @@ export async function run() {
     const packagePath = core.getInput('package-path') || 'package.json';
     const tagPrefix = core.getInput('tag-prefix') || 'v';
     const skipFilesCheck = core.getInput('skip-files-check') === 'true';
-    const skipVersionKeyword = core.getInput('skip-version-keyword') || DEFAULT_SKIP_KEYWORD;
+    // Handle skip-version-keyword: empty string explicitly disables, undefined/not-set uses default
+    const skipKeywordInput = core.getInput('skip-version-keyword');
+    const skipVersionKeyword = skipKeywordInput === '' ? '' : skipKeywordInput || DEFAULT_SKIP_KEYWORD;
     const token = core.getInput('token') || process.env.GITHUB_TOKEN;
 
     logMessage(`Package path: ${packagePath}`);
