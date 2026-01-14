@@ -337,6 +337,8 @@ export async function getChangedFilesWithSkipSupport(skipKeyword, token) {
   const filesFromNonSkippedCommits = new Set();
   let skippedCommits = 0;
 
+  // Separate commits into skipped and non-skipped
+  const nonSkippedCommits = [];
   for (const commit of commits) {
     const shouldSkip = skipKeyword && commit.message.includes(skipKeyword);
 
@@ -344,10 +346,19 @@ export async function getChangedFilesWithSkipSupport(skipKeyword, token) {
       skippedCommits++;
       logMessage(`⏭️  Skipping commit ${commit.sha.substring(0, 7)}: "${commit.message}"`, 'debug');
     } else {
-      const files = await getFilesForCommit(commit.sha, octokit, owner, repo);
-      for (const f of files) {
-        filesFromNonSkippedCommits.add(f);
-      }
+      nonSkippedCommits.push(commit);
+    }
+  }
+
+  // Fetch files for all non-skipped commits in parallel
+  const fileResults = await Promise.all(
+    nonSkippedCommits.map(commit => getFilesForCommit(commit.sha, octokit, owner, repo))
+  );
+
+  // Collect all unique files
+  for (const files of fileResults) {
+    for (const f of files) {
+      filesFromNonSkippedCommits.add(f);
     }
   }
 
