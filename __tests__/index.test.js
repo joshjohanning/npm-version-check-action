@@ -1864,7 +1864,11 @@ describe('npm Version Check Action - Integration Tests', () => {
       const commits = await getCommitsWithMessages('test-token');
 
       expect(commits).toHaveLength(2);
-      expect(commits[0]).toEqual({ sha: 'abc1234567890abcdef1234567890abcdef1234', message: 'Add feature' });
+      // Full message is returned for keyword matching
+      expect(commits[0]).toEqual({
+        sha: 'abc1234567890abcdef1234567890abcdef1234',
+        message: 'Add feature\n\nDetailed description'
+      });
       expect(commits[1]).toEqual({ sha: 'def4567890abcdef1234567890abcdef123456', message: 'Fix bug' });
       expect(mockOctokit.rest.pulls.listCommits).toHaveBeenCalledWith({
         owner: 'test-owner',

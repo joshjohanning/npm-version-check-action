@@ -282,7 +282,7 @@ export async function getCommitsWithMessages(token) {
 
     return commits.map(commit => ({
       sha: commit.sha,
-      message: commit.commit.message.split('\n')[0] // Get first line (subject)
+      message: commit.commit.message // Full commit message for keyword matching
     }));
   } catch (error) {
     logMessage(`⚠️  Could not fetch PR commits via API: ${error.message}`, 'warning');
@@ -859,7 +859,10 @@ export async function run() {
       logMessage(`Skip version keyword: ${skipVersionKeyword}`);
     }
     logMessage(`Token available: ${token ? 'yes' : 'no'}`);
-    logMessage(`Token source: ${core.getInput('token') ? 'input' : process.env.GITHUB_TOKEN ? 'env' : 'none'}`, 'debug');
+    logMessage(
+      `Token source: ${core.getInput('token') ? 'input' : process.env.GITHUB_TOKEN ? 'env' : 'none'}`,
+      'debug'
+    );
 
     // This action only works on pull request events
     if (github.context.eventName !== 'pull_request') {
