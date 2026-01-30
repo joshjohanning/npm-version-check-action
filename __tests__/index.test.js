@@ -471,6 +471,148 @@ describe('npm Version Check Action - Helper Functions', () => {
     });
   });
 
+  describe('validatePackageVersionConsistency', () => {
+    let mockFs;
+
+    beforeAll(async () => {
+      mockFs = await import('fs');
+    });
+
+    beforeEach(() => {
+      mockFs.existsSync.mockClear();
+      mockFs.readFileSync.mockClear();
+    });
+
+    test('should return valid when versions match', () => {
+      const { validatePackageVersionConsistency } = indexModule;
+      const mockPackageJson = { name: 'test-package', version: '1.2.3' };
+      const mockPackageLock = { name: 'test-package', version: '1.2.3', lockfileVersion: 3 };
+
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.readFileSync.mockImplementation(filePath => {
+        if (filePath === 'package.json') {
+          return JSON.stringify(mockPackageJson);
+        }
+        if (filePath === 'package-lock.json') {
+          return JSON.stringify(mockPackageLock);
+        }
+        throw new Error(`Unexpected file: ${filePath}`);
+      });
+
+      const result = validatePackageVersionConsistency('package.json');
+      expect(result.isValid).toBe(true);
+      expect(result.packageVersion).toBe('1.2.3');
+      expect(result.lockVersion).toBe('1.2.3');
+      expect(result.error).toBeNull();
+    });
+
+    test('should return invalid when versions do not match', () => {
+      const { validatePackageVersionConsistency } = indexModule;
+      const mockPackageJson = { name: 'test-package', version: '1.2.4' };
+      const mockPackageLock = { name: 'test-package', version: '1.2.3', lockfileVersion: 3 };
+
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.readFileSync.mockImplementation(filePath => {
+        if (filePath === 'package.json') {
+          return JSON.stringify(mockPackageJson);
+        }
+        if (filePath === 'package-lock.json') {
+          return JSON.stringify(mockPackageLock);
+        }
+        throw new Error(`Unexpected file: ${filePath}`);
+      });
+
+      const result = validatePackageVersionConsistency('package.json');
+      expect(result.isValid).toBe(false);
+      expect(result.packageVersion).toBe('1.2.4');
+      expect(result.lockVersion).toBe('1.2.3');
+      expect(result.error).toContain('Version mismatch');
+      expect(result.error).toContain('1.2.4');
+      expect(result.error).toContain('1.2.3');
+    });
+
+    test('should return valid when package-lock.json does not exist', () => {
+      const { validatePackageVersionConsistency } = indexModule;
+      const mockPackageJson = { name: 'test-package', version: '1.2.3' };
+
+      mockFs.existsSync.mockImplementation(filePath => {
+        if (filePath === 'package.json') return true;
+        if (filePath === 'package-lock.json') return false;
+        return false;
+      });
+      mockFs.readFileSync.mockReturnValue(JSON.stringify(mockPackageJson));
+
+      const result = validatePackageVersionConsistency('package.json');
+      expect(result.isValid).toBe(true);
+      expect(result.packageVersion).toBe('1.2.3');
+      expect(result.lockVersion).toBeNull();
+      expect(result.error).toBeNull();
+    });
+
+    test('should return invalid when package.json does not exist', () => {
+      const { validatePackageVersionConsistency } = indexModule;
+
+      mockFs.existsSync.mockReturnValue(false);
+
+      const result = validatePackageVersionConsistency('package.json');
+      expect(result.isValid).toBe(false);
+      expect(result.error).toContain('package.json not found');
+    });
+
+    test('should return invalid for invalid JSON in package.json', () => {
+      const { validatePackageVersionConsistency } = indexModule;
+
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.readFileSync.mockReturnValue('{ invalid json }');
+
+      const result = validatePackageVersionConsistency('package.json');
+      expect(result.isValid).toBe(false);
+      expect(result.error).toContain('Invalid JSON');
+    });
+
+    test('should return invalid for invalid JSON in package-lock.json', () => {
+      const { validatePackageVersionConsistency } = indexModule;
+      const mockPackageJson = { name: 'test-package', version: '1.2.3' };
+
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.readFileSync.mockImplementation(filePath => {
+        if (filePath === 'package.json') {
+          return JSON.stringify(mockPackageJson);
+        }
+        if (filePath === 'package-lock.json') {
+          return '{ invalid json }';
+        }
+        throw new Error(`Unexpected file: ${filePath}`);
+      });
+
+      const result = validatePackageVersionConsistency('package.json');
+      expect(result.isValid).toBe(false);
+      expect(result.error).toContain('Invalid JSON');
+    });
+
+    test('should handle nested package.json path correctly', () => {
+      const { validatePackageVersionConsistency } = indexModule;
+      const mockPackageJson = { name: 'test-package', version: '2.0.0' };
+      const mockPackageLock = { name: 'test-package', version: '2.0.0', lockfileVersion: 3 };
+
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.readFileSync.mockImplementation(filePath => {
+        if (filePath === 'packages/subproject/package.json') {
+          return JSON.stringify(mockPackageJson);
+        }
+        if (filePath === 'packages/subproject/package-lock.json') {
+          return JSON.stringify(mockPackageLock);
+        }
+        throw new Error(`Unexpected file: ${filePath}`);
+      });
+
+      const result = validatePackageVersionConsistency('packages/subproject/package.json');
+      expect(result.isValid).toBe(true);
+      expect(result.packageVersion).toBe('2.0.0');
+      expect(result.lockVersion).toBe('2.0.0');
+    });
+  });
+
   describe('logMessage', () => {
     beforeEach(() => {
       jest.clearAllMocks();
@@ -2627,6 +2769,109 @@ describe('npm Version Check Action - Integration Tests', () => {
       // When all files are skipped, changedFiles is empty so no relevant changes detected
       expect(mockCore.warning).toHaveBeenCalledWith(
         '⏭️  No JavaScript/TypeScript files or dependency changes detected, skipping version check'
+      );
+    });
+
+    test('should skip version consistency check when skip-version-consistency-check is true', async () => {
+      const { run } = indexModule;
+
+      // Override to return true for skip-version-consistency-check
+      mockCore.getInput.mockImplementation(input => {
+        switch (input) {
+          case 'package-path':
+            return 'package.json';
+          case 'tag-prefix':
+            return 'v';
+          case 'skip-files-check':
+            return 'true'; // Skip files check to simplify test
+          case 'skip-version-consistency-check':
+            return 'true'; // Skip consistency check
+          case 'token':
+            return 'test-token';
+          case 'skip-version-keyword':
+            return '[skip version]';
+          default:
+            return '';
+        }
+      });
+
+      // Mock package.json and package-lock.json with DIFFERENT versions
+      // If the check was running, this would fail
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.readFileSync.mockImplementation(filePath => {
+        if (filePath === 'package.json') {
+          return JSON.stringify({ name: 'test', version: '1.1.0' });
+        }
+        if (filePath === 'package-lock.json') {
+          return JSON.stringify({ name: 'test', version: '1.0.0', lockfileVersion: 3 }); // Different version!
+        }
+        return '{}';
+      });
+
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('tag')) {
+          options.listeners.stdout('v1.0.0');
+        }
+        return 0;
+      });
+
+      mockSemver.compare.mockReturnValue(1); // Higher version
+
+      await run();
+
+      // Should log that consistency check was skipped
+      expect(mockCore.info).toHaveBeenCalledWith(
+        '⏭️  Skipping version consistency check (skip-version-consistency-check: true)'
+      );
+      // Should NOT fail due to version mismatch
+      expect(mockCore.setFailed).not.toHaveBeenCalledWith(expect.stringContaining('Version mismatch'));
+      // Should complete successfully
+      expect(mockCore.info).toHaveBeenCalledWith('🏁 Version check completed successfully');
+    });
+
+    test('should fail when package.json and package-lock.json versions do not match', async () => {
+      const { run } = indexModule;
+
+      // Default config (consistency check enabled)
+      mockCore.getInput.mockImplementation(input => {
+        switch (input) {
+          case 'package-path':
+            return 'package.json';
+          case 'tag-prefix':
+            return 'v';
+          case 'skip-files-check':
+            return 'true'; // Skip files check to simplify test
+          case 'skip-version-consistency-check':
+            return 'false'; // Consistency check enabled (default)
+          case 'token':
+            return 'test-token';
+          case 'skip-version-keyword':
+            return '[skip version]';
+          default:
+            return '';
+        }
+      });
+
+      // Mock package.json and package-lock.json with DIFFERENT versions
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.readFileSync.mockImplementation(filePath => {
+        if (filePath === 'package.json') {
+          return JSON.stringify({ name: 'test', version: '1.1.0' });
+        }
+        if (filePath === 'package-lock.json') {
+          return JSON.stringify({ name: 'test', version: '1.0.0', lockfileVersion: 3 }); // Different version!
+        }
+        return '{}';
+      });
+
+      mockExec.exec.mockResolvedValue(0);
+
+      await run();
+
+      // Should fail due to version mismatch
+      expect(mockCore.setFailed).toHaveBeenCalledWith(expect.stringContaining('Version mismatch'));
+      expect(mockCore.notice).toHaveBeenCalledWith(
+        `💡 HINT: Run 'npm install' to regenerate package-lock.json with the correct version`
       );
     });
   });

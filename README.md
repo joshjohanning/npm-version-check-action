@@ -14,6 +14,7 @@ This action prevents developers from forgetting to bump package.json version bef
 
 - 🎯 **Smart file detection** - Only runs when JavaScript/TypeScript/package files are modified
 - 🧠 **Intelligent dependency checking** - Distinguishes between actual dependency changes vs metadata-only changes in package.json and package-lock.json
+- 🔒 **Version consistency check** - Validates that package.json and package-lock.json have matching versions
 - 🔧 **Configurable devDependencies handling** - Choose whether devDependency changes should trigger version bumps
 - ⏭️ **Per-commit skip support** - Use `[skip version]` in commit messages to exclude specific commits from version checking
 - 📊 **Semantic versioning validation** - Ensures new version is higher than previous release
@@ -104,14 +105,15 @@ jobs:
 
 ## 📥 Inputs
 
-| Input                      | Description                                                                                      | Required | Default               |
-| -------------------------- | ------------------------------------------------------------------------------------------------ | -------- | --------------------- |
-| `package-path`             | Path to package.json file (relative to repository root)                                          | No       | `package.json`        |
-| `tag-prefix`               | Prefix for version tags (e.g., "v" for v1.0.0)                                                   | No       | `v`                   |
-| `skip-files-check`         | Skip checking if JS/package files changed (always run version check)                             | No       | `false`               |
-| `include-dev-dependencies` | Whether devDependency changes should trigger version bump requirement                            | No       | `false`               |
-| `skip-version-keyword`     | Keyword in commit messages to skip version check for that commit's files. Set to `''` to disable | No       | `[skip version]`      |
-| `token`                    | GitHub token for API access (required for `skip-version-keyword` to analyze commits)             | No       | `${{ github.token }}` |
+| Input                            | Description                                                                                      | Required | Default               |
+| -------------------------------- | ------------------------------------------------------------------------------------------------ | -------- | --------------------- |
+| `package-path`                   | Path to package.json file (relative to repository root)                                          | No       | `package.json`        |
+| `tag-prefix`                     | Prefix for version tags (e.g., "v" for v1.0.0)                                                   | No       | `v`                   |
+| `skip-files-check`               | Skip checking if JS/package files changed (always run version check)                             | No       | `false`               |
+| `include-dev-dependencies`       | Whether devDependency changes should trigger version bump requirement                            | No       | `false`               |
+| `skip-version-keyword`           | Keyword in commit messages to skip version check for that commit's files. Set to `''` to disable | No       | `[skip version]`      |
+| `skip-version-consistency-check` | Skip the check that validates package.json and package-lock.json have matching versions          | No       | `false`               |
+| `token`                          | GitHub token for API access (required for `skip-version-keyword` to analyze commits)             | No       | `${{ github.token }}` |
 
 ## 📤 Outputs
 
@@ -143,10 +145,13 @@ jobs:
 2. **Intelligent Dependency Analysis**: For package files, distinguishes between:
    - **Functional changes**: Actual dependency additions, updates, or removals that affect functionality
    - **Metadata changes**: Version bumps, description updates, scripts changes, or devDependency changes that don't affect runtime
-3. **Version Extraction**: Reads the current version from `package.json`
-4. **Tag Comparison**: Fetches the latest git tag and compares versions
-5. **Semantic Validation**: Ensures the new version is higher than the previous release
-6. **Clear Feedback**: Provides success or error messages with actionable hints
+3. **Version Consistency Check**: Validates that `package.json` and `package-lock.json` have matching versions
+   - Prevents issues where one file is updated but the other is not (e.g., after rebasing or manual edits)
+   - Fails the build with a clear error message if versions don't match
+4. **Version Extraction**: Reads the current version from `package.json`
+5. **Tag Comparison**: Fetches the latest git tag and compares versions
+6. **Semantic Validation**: Ensures the new version is higher than the previous release
+7. **Clear Feedback**: Provides success or error messages with actionable hints
 
 ### Smart File Detection
 
