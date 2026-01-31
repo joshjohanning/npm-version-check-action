@@ -777,6 +777,68 @@ export function readPackageJson(packagePath) {
 }
 
 /**
+ * Validates that package.json and package-lock.json have consistent versions.
+ * This prevents issues where one file is updated but the other is not.
+ *
+ * @param {string} packagePath - Path to the package.json file
+ * @returns {{isValid: boolean, packageVersion: string|null, lockVersion: string|null, error: string|null}} Validation result
+ */
+export function validatePackageVersionConsistency(packagePath) {
+  const result = {
+    isValid: true,
+    packageVersion: null,
+    lockVersion: null,
+    error: null
+  };
+
+  try {
+    // Read package.json
+    if (!fs.existsSync(packagePath)) {
+      result.isValid = false;
+      result.error = `package.json not found at path: ${packagePath}`;
+      return result;
+    }
+
+    const packageContent = fs.readFileSync(packagePath, 'utf8');
+    const packageJson = JSON.parse(packageContent);
+    result.packageVersion = packageJson.version || null;
+
+    // Derive package-lock.json path from package.json path
+    const packageDir = path.dirname(packagePath);
+    const lockPath = path.join(packageDir, PACKAGE_LOCK_JSON_FILENAME);
+
+    // Check if package-lock.json exists
+    if (!fs.existsSync(lockPath)) {
+      // package-lock.json doesn't exist - this is acceptable, some projects don't use it
+      logMessage('ℹ️  No package-lock.json found, skipping version consistency check', 'debug');
+      return result;
+    }
+
+    // Read package-lock.json
+    const lockContent = fs.readFileSync(lockPath, 'utf8');
+    const lockJson = JSON.parse(lockContent);
+    result.lockVersion = lockJson.version || null;
+
+    // Compare versions
+    if (result.packageVersion && result.lockVersion && result.packageVersion !== result.lockVersion) {
+      result.isValid = false;
+      result.error = `Version mismatch: package.json has version "${result.packageVersion}" but package-lock.json has version "${result.lockVersion}". Run 'npm install' to sync the versions.`;
+    }
+
+    return result;
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      result.isValid = false;
+      result.error = `Invalid JSON: ${error.message}`;
+      return result;
+    }
+    result.isValid = false;
+    result.error = error.message;
+    return result;
+  }
+}
+
+/**
  * Retrieves the latest version tag from git that matches the specified prefix.
  *
  * @param {string} tagPrefix - The prefix to filter version tags (e.g., 'v' for tags like 'v1.2.3').
@@ -866,6 +928,7 @@ export async function run() {
     const packagePath = core.getInput('package-path') || 'package.json';
     const tagPrefix = core.getInput('tag-prefix') || 'v';
     const skipFilesCheck = core.getInput('skip-files-check') === 'true';
+    const skipVersionConsistencyCheck = core.getInput('skip-version-consistency-check') === 'true';
     // Handle skip-version-keyword: empty string explicitly disables, undefined/not-set uses default
     const skipKeywordInput = core.getInput('skip-version-keyword');
     const skipVersionKeyword = skipKeywordInput === '' ? '' : skipKeywordInput || DEFAULT_SKIP_KEYWORD;
@@ -874,6 +937,7 @@ export async function run() {
     logMessage(`Package path: ${packagePath}`);
     logMessage(`Tag prefix: ${tagPrefix}`);
     logMessage(`Skip files check: ${skipFilesCheck}`);
+    logMessage(`Skip version consistency check: ${skipVersionConsistencyCheck}`);
     if (skipVersionKeyword) {
       logMessage(`Skip version keyword: ${skipVersionKeyword}`);
     }
@@ -958,6 +1022,22 @@ export async function run() {
         const relevantFiles = changedFiles.filter(file => isRelevantFile(file));
         logMessage(`Changed files: ${relevantFiles.join(', ')}`);
       }
+    }
+
+    // Validate package.json and package-lock.json version consistency
+    if (!skipVersionConsistencyCheck) {
+      logMessage('🔄 Checking package.json and package-lock.json version consistency...');
+      const consistencyResult = validatePackageVersionConsistency(packagePath);
+      if (!consistencyResult.isValid) {
+        core.setFailed(`❌ ERROR: ${consistencyResult.error}`);
+        logMessage(`💡 HINT: Run 'npm install' to regenerate package-lock.json with the correct version`, 'notice');
+        return;
+      }
+      if (consistencyResult.lockVersion) {
+        logMessage(`✅ Version consistency check passed (${consistencyResult.packageVersion})`);
+      }
+    } else {
+      logMessage('⏭️  Skipping version consistency check (skip-version-consistency-check: true)');
     }
 
     // Read package.json
