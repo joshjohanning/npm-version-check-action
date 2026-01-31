@@ -26,6 +26,10 @@ inputs:
     description: 'Keyword in commit messages to skip version check for that commit. Files changed in commits containing this keyword are excluded from the version check. Set to empty string to disable.'
     required: false
     default: '[skip version]'
+  skip-version-consistency-check:
+    description: 'Skip the check that validates package.json and package-lock.json have matching versions. Useful if you intentionally have different versions or do not use package-lock.json.'
+    required: false
+    default: 'false'
   token:
     description: 'GitHub token for API access. Required for skip-version-keyword feature to work with shallow clones.'
     required: false
