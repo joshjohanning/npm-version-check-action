@@ -568,6 +568,39 @@ function areAllChangesDevDependencies(baseLock, headLock, changedKeys) {
 }
 
 /**
+ * Walk the dependency tree in a lockfile's packages section to find all transitive
+ * dependencies reachable from a set of starting packages.
+ * Used to determine if lockfile changes are attributable to specific dependency updates.
+ * @param {Object} lockPackages - The packages section of a package-lock.json
+ * @param {string[]} startKeys - Array of package keys to start walking from (e.g., ['node_modules/jest'])
+ * @returns {Set<string>} Set of all reachable package keys including the start keys
+ */
+function getTransitiveDeps(lockPackages, startKeys) {
+  const visited = new Set();
+  const queue = [...startKeys];
+
+  while (queue.length > 0) {
+    const key = queue.shift();
+    if (visited.has(key)) continue;
+    visited.add(key);
+
+    const pkg = lockPackages[key];
+    if (!pkg) continue;
+
+    // Follow dependencies and optionalDependencies to reach all transitives
+    const deps = { ...(pkg.dependencies || {}), ...(pkg.optionalDependencies || {}) };
+    for (const depName of Object.keys(deps)) {
+      const depKey = `node_modules/${depName}`;
+      if (!visited.has(depKey)) {
+        queue.push(depKey);
+      }
+    }
+  }
+
+  return visited;
+}
+
+/**
  * Check if package files have actual dependency changes (not just metadata changes)
  * This covers both package.json and package-lock.json files
  * @param {string[]|null} changedFiles - Optional list of changed files to filter which package files to check.
@@ -609,6 +642,7 @@ export async function hasPackageDependencyChanges(changedFiles = null) {
 
     let hasProductionChanges = false;
     let hasAnyDevChanges = false;
+    const changedDevDepNames = new Set();
 
     // Check package.json for dependency changes using proper JSON parsing
     if (shouldCheckPackageJson) {
@@ -650,6 +684,16 @@ export async function hasPackageDependencyChanges(changedFiles = null) {
             } else {
               logMessage('Debug: Only devDependencies changed in package.json', 'debug');
             }
+
+            // Collect names of changed dev dependencies for lockfile tree walking analysis
+            const baseDevDeps = basePackageJson.devDependencies || {};
+            const headDevDeps = headPackageJson.devDependencies || {};
+            const allDevNames = new Set([...Object.keys(baseDevDeps), ...Object.keys(headDevDeps)]);
+            for (const name of allDevNames) {
+              if (baseDevDeps[name] !== headDevDeps[name]) {
+                changedDevDepNames.add(name);
+              }
+            }
           }
         } catch (error) {
           // If JSON parsing fails, conservatively assume a change
@@ -661,6 +705,13 @@ export async function hasPackageDependencyChanges(changedFiles = null) {
         return { hasChanges: true, onlyDevDependencies: false };
       }
     }
+
+    // After package.json analysis: if package.json was checked, showed zero production
+    // dependency section changes, AND confirmed devDependency changes, record that fact.
+    // This is used to gate the lockfile analysis below, because npm can reshuffle the
+    // lockfile tree (hoisting, deduplication) as a side-effect of any dependency change,
+    // and those reshuffled packages may lack "dev": true.
+    const packageJsonHasOnlyDevChanges = shouldCheckPackageJson && !hasProductionChanges && hasAnyDevChanges;
 
     // Check package-lock.json for actual dependency changes
     if (shouldCheckPackageLock) {
@@ -707,6 +758,55 @@ export async function hasPackageDependencyChanges(changedFiles = null) {
                   hasProductionChanges = true;
                 } else {
                   logMessage('Debug: Only devDependencies changed in package-lock.json', 'debug');
+                }
+              } else if (packageJsonHasOnlyDevChanges) {
+                // package.json shows only devDependency changes. Walk the dependency tree
+                // from changed devDeps to determine if non-dev lockfile changes are just
+                // reshuffling (transitive deps of the changed devDeps) or genuine production
+                // changes (e.g., intentional transitive bumps for security fixes).
+                const headPkgs = headLock.packages || {};
+                const basePkgs = baseLock.packages || {};
+
+                if (Object.keys(headPkgs).length > 0 || Object.keys(basePkgs).length > 0) {
+                  const startKeys = [...changedDevDepNames].map(n => `node_modules/${n}`);
+                  const headTransitives = getTransitiveDeps(headPkgs, startKeys);
+                  const baseTransitives = getTransitiveDeps(basePkgs, startKeys);
+                  const devTransitives = new Set([...headTransitives, ...baseTransitives]);
+
+                  let hasNonAttributableChange = false;
+                  for (const key of changedKeys) {
+                    const headPkg = headPkgs[key];
+                    const basePkg = basePkgs[key];
+                    // Skip packages already known to be dev-only
+                    if ((headPkg && headPkg.dev) || (!headPkg && basePkg && basePkg.dev)) continue;
+
+                    if (!devTransitives.has(key)) {
+                      logMessage(`Debug: lockfile change not attributable to devDependency update: ${key}`, 'debug');
+                      hasNonAttributableChange = true;
+                      break;
+                    }
+                  }
+
+                  if (hasNonAttributableChange) {
+                    logMessage(
+                      'Debug: package-lock.json has production changes alongside devDependency reshuffling',
+                      'debug'
+                    );
+                    hasProductionChanges = true;
+                  } else {
+                    logMessage(
+                      'Debug: all non-dev lockfile changes are transitives of changed devDependencies - treating as reshuffling',
+                      'debug'
+                    );
+                    hasAnyDevChanges = true;
+                  }
+                } else {
+                  // No packages section available (old lockfile format) - can't walk tree, be conservative
+                  logMessage(
+                    'Debug: package-lock.json has non-dev changes but no packages section for tree analysis - treating as production',
+                    'debug'
+                  );
+                  hasProductionChanges = true;
                 }
               } else {
                 logMessage('Debug: package-lock.json has production dependency changes', 'debug');

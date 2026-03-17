@@ -170,19 +170,20 @@ The action intelligently handles different types of file changes:
   - ✅ **Triggers check**: Changes to `dependencies`, `peerDependencies`, `optionalDependencies`, `bundleDependencies`
   - ✅ **Triggers check (configurable)**: Changes to `devDependencies` when `include-dev-dependencies: true`
   - ❌ **Skips check**: Changes to `version`, `description`, `scripts`, `author`, etc.
-- `package-lock.json` - **Smart handling based on devDependencies configuration**
+- `package-lock.json` - **Smart handling with dependency tree analysis**
   - ✅ **Always triggers check**: Production dependency changes (new packages, version updates, integrity changes)
   - 🔄 **Configurable behavior**: When only devDependencies changed in package.json:
-    - ❌ **Skips check** if `include-dev-dependencies: false` (default) - package-lock.json changes are ignored
+    - ❌ **Skips check** if `include-dev-dependencies: false` (default) - lockfile changes caused by devDependency updates (including shared transitive dependency reshuffling) are correctly identified and ignored
     - ✅ **Triggers check** if `include-dev-dependencies: true` - package-lock.json changes are analyzed
   - ❌ **Skips check**: Pure metadata changes (version bumps, format updates)
 
-#### 🎯 Key Improvement: Simplified DevDependency Logic
+#### 🎯 Key Improvement: Dependency Tree Walking for Lockfile Analysis
 
 When `include-dev-dependencies: false` (default) and only devDependencies change in package.json:
 
-- The action **completely skips** package-lock.json analysis
-- This prevents false positives where massive lock file changes from dev dependency updates incorrectly trigger version bump requirements
+- The action walks the dependency tree from each changed devDependency to identify which lockfile changes are attributable to the devDep update
+- Shared transitive dependencies (packages used by both production and dev trees) that get reshuffled by npm are correctly treated as dev-only changes
+- Lockfile changes to packages **not** reachable from any changed devDependency are still flagged as production changes (e.g., intentional transitive bumps for security fixes)
 - Much simpler and more reliable than trying to filter dev dependencies from complex lock file structures
 
 This intelligent approach prevents unnecessary version bumps when only non-functional changes are made.

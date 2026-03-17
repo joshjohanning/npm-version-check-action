@@ -1381,6 +1381,358 @@ describe('hasPackageDependencyChanges', () => {
     expect(result).toEqual({ hasChanges: false, onlyDevDependencies: true });
   });
 
+  test('should treat lockfile reshuffling as dev-only when package.json shows no production changes', async () => {
+    const { hasPackageDependencyChanges } = indexModule;
+
+    // This reproduces a real-world scenario where updating a devDependency causes npm to
+    // reshuffle the lockfile tree (hoisting shared sub-dependencies). The hoisted packages
+    // do NOT have "dev": true because they are shared between prod and dev trees, but the
+    // actual change is dev-only per package.json.
+
+    // Base package.json
+    const basePackageJson = {
+      name: 'my-org-tool',
+      version: '2.0.0',
+      dependencies: {
+        '@octokit/rest': '^20.0.0'
+      },
+      devDependencies: {
+        '@octokit/webhooks-types': '^7.1.0'
+      }
+    };
+
+    // Head package.json - ONLY devDependencies updated
+    const headPackageJson = {
+      name: 'my-org-tool',
+      version: '2.0.0',
+      dependencies: {
+        '@octokit/rest': '^20.0.0' // unchanged
+      },
+      devDependencies: {
+        '@octokit/webhooks-types': '^7.6.0' // bumped
+      }
+    };
+
+    // Base package-lock.json
+    const basePackageLock = {
+      name: 'my-org-tool',
+      version: '2.0.0',
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        '': {
+          name: 'my-org-tool',
+          version: '2.0.0',
+          dependencies: { '@octokit/rest': '^20.0.0' },
+          devDependencies: { '@octokit/webhooks-types': '^7.1.0' }
+        },
+        'node_modules/@octokit/rest': {
+          version: '20.0.2',
+          resolved: 'https://registry.npmjs.org/@octokit/rest/-/rest-20.0.2.tgz',
+          integrity: 'sha512-rest',
+          dependencies: {
+            '@octokit/core': '^5.0.0'
+          }
+        },
+        'node_modules/@octokit/core': {
+          version: '5.0.0',
+          resolved: 'https://registry.npmjs.org/@octokit/core/-/core-5.0.0.tgz',
+          integrity: 'sha512-core50'
+          // No "dev": true -- shared sub-dependency of @octokit/rest (prod)
+        },
+        'node_modules/@octokit/webhooks-types': {
+          version: '7.1.0',
+          resolved: 'https://registry.npmjs.org/@octokit/webhooks-types/-/webhooks-types-7.1.0.tgz',
+          integrity: 'sha512-wh71',
+          dev: true,
+          dependencies: {
+            '@octokit/core': '^5.0.0'
+          }
+        }
+      }
+    };
+
+    // Head package-lock.json - npm reshuffled the tree when updating the dev dependency.
+    // @octokit/core was re-resolved to a newer version (transitive dep of both rest and webhooks-types)
+    // but still lacks "dev": true because it is shared with the production @octokit/rest tree.
+    const headPackageLock = {
+      name: 'my-org-tool',
+      version: '2.0.0',
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        '': {
+          name: 'my-org-tool',
+          version: '2.0.0',
+          dependencies: { '@octokit/rest': '^20.0.0' },
+          devDependencies: { '@octokit/webhooks-types': '^7.6.0' }
+        },
+        'node_modules/@octokit/rest': {
+          version: '20.0.2',
+          resolved: 'https://registry.npmjs.org/@octokit/rest/-/rest-20.0.2.tgz',
+          integrity: 'sha512-rest',
+          dependencies: {
+            '@octokit/core': '^5.0.0'
+          }
+        },
+        'node_modules/@octokit/core': {
+          version: '5.2.0', // version changed due to lockfile reshuffling
+          resolved: 'https://registry.npmjs.org/@octokit/core/-/core-5.2.0.tgz',
+          integrity: 'sha512-core52'
+          // Still no "dev": true -- shared between prod and dev trees
+        },
+        'node_modules/@octokit/webhooks-types': {
+          version: '7.6.0',
+          resolved: 'https://registry.npmjs.org/@octokit/webhooks-types/-/webhooks-types-7.6.0.tgz',
+          integrity: 'sha512-wh76',
+          dev: true,
+          dependencies: {
+            '@octokit/core': '^5.0.0'
+          }
+        }
+      }
+    };
+
+    mockCore.getBooleanInput.mockImplementation(input => {
+      if (input === 'include-dev-dependencies') return false;
+      return false;
+    });
+
+    mockExec.exec.mockImplementation(
+      createExecMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock)
+    );
+
+    const result = await hasPackageDependencyChanges();
+
+    // package.json shows only devDependencies changed, so the lockfile reshuffling
+    // of shared packages (without dev: true) should NOT be treated as production changes
+    expect(result).toEqual({ hasChanges: false, onlyDevDependencies: true });
+  });
+
+  test('should detect prod transitive changes even when package.json shows only devDependency changes', async () => {
+    const { hasPackageDependencyChanges } = indexModule;
+
+    // This reproduces the combined scenario: devDep bump + intentional prod transitive
+    // update (e.g., fixing a vulnerability in undici) in the same PR. The tree walking
+    // should correctly identify that undici is NOT a transitive of the changed devDep,
+    // while @octokit/core IS (and is just reshuffling).
+
+    const basePackageJson = {
+      name: 'my-org-tool',
+      version: '2.0.0',
+      dependencies: {
+        '@octokit/rest': '^20.0.0'
+      },
+      devDependencies: {
+        '@octokit/webhooks-types': '^7.1.0'
+      }
+    };
+
+    // Head package.json - ONLY devDependencies updated
+    const headPackageJson = {
+      name: 'my-org-tool',
+      version: '2.0.0',
+      dependencies: {
+        '@octokit/rest': '^20.0.0'
+      },
+      devDependencies: {
+        '@octokit/webhooks-types': '^7.6.0'
+      }
+    };
+
+    const basePackageLock = {
+      name: 'my-org-tool',
+      version: '2.0.0',
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        '': {
+          name: 'my-org-tool',
+          version: '2.0.0',
+          dependencies: { '@octokit/rest': '^20.0.0' },
+          devDependencies: { '@octokit/webhooks-types': '^7.1.0' }
+        },
+        'node_modules/@octokit/rest': {
+          version: '20.0.2',
+          resolved: 'https://registry.npmjs.org/@octokit/rest/-/rest-20.0.2.tgz',
+          dependencies: {
+            '@octokit/core': '^5.0.0',
+            undici: '^6.0.0'
+          }
+        },
+        'node_modules/@octokit/core': {
+          version: '5.0.0',
+          resolved: 'https://registry.npmjs.org/@octokit/core/-/core-5.0.0.tgz'
+        },
+        'node_modules/@octokit/webhooks-types': {
+          version: '7.1.0',
+          resolved: 'https://registry.npmjs.org/@octokit/webhooks-types/-/webhooks-types-7.1.0.tgz',
+          dev: true,
+          dependencies: {
+            '@octokit/core': '^5.0.0'
+          }
+        },
+        'node_modules/undici': {
+          version: '6.19.0',
+          resolved: 'https://registry.npmjs.org/undici/-/undici-6.19.0.tgz'
+        }
+      }
+    };
+
+    // Head lockfile: webhooks-types bumped (dev), @octokit/core reshuffled (shared),
+    // and undici intentionally bumped for a vulnerability fix (prod transitive)
+    const headPackageLock = {
+      name: 'my-org-tool',
+      version: '2.0.0',
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        '': {
+          name: 'my-org-tool',
+          version: '2.0.0',
+          dependencies: { '@octokit/rest': '^20.0.0' },
+          devDependencies: { '@octokit/webhooks-types': '^7.6.0' }
+        },
+        'node_modules/@octokit/rest': {
+          version: '20.0.2',
+          resolved: 'https://registry.npmjs.org/@octokit/rest/-/rest-20.0.2.tgz',
+          dependencies: {
+            '@octokit/core': '^5.0.0',
+            undici: '^6.0.0'
+          }
+        },
+        'node_modules/@octokit/core': {
+          version: '5.2.0', // reshuffled - transitive of changed devDep
+          resolved: 'https://registry.npmjs.org/@octokit/core/-/core-5.2.0.tgz'
+        },
+        'node_modules/@octokit/webhooks-types': {
+          version: '7.6.0',
+          resolved: 'https://registry.npmjs.org/@octokit/webhooks-types/-/webhooks-types-7.6.0.tgz',
+          dev: true,
+          dependencies: {
+            '@octokit/core': '^5.0.0'
+          }
+        },
+        'node_modules/undici': {
+          version: '6.21.0', // intentional prod transitive bump (vuln fix)
+          resolved: 'https://registry.npmjs.org/undici/-/undici-6.21.0.tgz'
+        }
+      }
+    };
+
+    mockCore.getBooleanInput.mockImplementation(input => {
+      if (input === 'include-dev-dependencies') return false;
+      return false;
+    });
+
+    mockExec.exec.mockImplementation(
+      createExecMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock)
+    );
+
+    const result = await hasPackageDependencyChanges();
+
+    // undici is NOT a transitive of @octokit/webhooks-types, so it's a genuine
+    // production change that should be flagged even though package.json only shows devDep changes
+    expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false });
+  });
+
+  test('should still detect production changes when both package.json prod deps and lockfile change', async () => {
+    const { hasPackageDependencyChanges } = indexModule;
+
+    // This ensures the fix does not create a false negative when package.json actually
+    // has production dependency changes alongside lockfile reshuffling.
+
+    const basePackageJson = {
+      name: 'my-tool',
+      version: '1.0.0',
+      dependencies: {
+        '@octokit/rest': '^19.0.0'
+      },
+      devDependencies: {
+        jest: '^29.0.0'
+      }
+    };
+
+    const headPackageJson = {
+      name: 'my-tool',
+      version: '1.0.0',
+      dependencies: {
+        '@octokit/rest': '^20.0.0' // production dep changed
+      },
+      devDependencies: {
+        jest: '^29.7.0' // dev dep also changed
+      }
+    };
+
+    const basePackageLock = {
+      name: 'my-tool',
+      version: '1.0.0',
+      lockfileVersion: 3,
+      packages: {
+        '': {
+          name: 'my-tool',
+          version: '1.0.0',
+          dependencies: { '@octokit/rest': '^19.0.0' },
+          devDependencies: { jest: '^29.0.0' }
+        },
+        'node_modules/@octokit/rest': {
+          version: '19.0.13',
+          resolved: 'https://registry.npmjs.org/@octokit/rest/-/rest-19.0.13.tgz'
+        },
+        'node_modules/@octokit/core': {
+          version: '4.0.0',
+          resolved: 'https://registry.npmjs.org/@octokit/core/-/core-4.0.0.tgz'
+        },
+        'node_modules/jest': {
+          version: '29.0.0',
+          resolved: 'https://registry.npmjs.org/jest/-/jest-29.0.0.tgz',
+          dev: true
+        }
+      }
+    };
+
+    const headPackageLock = {
+      name: 'my-tool',
+      version: '1.0.0',
+      lockfileVersion: 3,
+      packages: {
+        '': {
+          name: 'my-tool',
+          version: '1.0.0',
+          dependencies: { '@octokit/rest': '^20.0.0' },
+          devDependencies: { jest: '^29.7.0' }
+        },
+        'node_modules/@octokit/rest': {
+          version: '20.0.2',
+          resolved: 'https://registry.npmjs.org/@octokit/rest/-/rest-20.0.2.tgz'
+        },
+        'node_modules/@octokit/core': {
+          version: '5.2.0',
+          resolved: 'https://registry.npmjs.org/@octokit/core/-/core-5.2.0.tgz'
+        },
+        'node_modules/jest': {
+          version: '29.7.0',
+          resolved: 'https://registry.npmjs.org/jest/-/jest-29.7.0.tgz',
+          dev: true
+        }
+      }
+    };
+
+    mockCore.getBooleanInput.mockImplementation(input => {
+      if (input === 'include-dev-dependencies') return false;
+      return false;
+    });
+
+    mockExec.exec.mockImplementation(
+      createExecMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock)
+    );
+
+    const result = await hasPackageDependencyChanges();
+
+    // package.json shows production dependency change, so lockfile changes are real
+    expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false });
+  });
+
   test('should return onlyDevDependencies=true when package-lock.json has only devDependency changes (npm v7+ format)', async () => {
     const { hasPackageDependencyChanges } = indexModule;
 
