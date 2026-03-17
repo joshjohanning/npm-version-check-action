@@ -1178,7 +1178,7 @@ export async function run() {
 
       if (!hasRegularChanges && !hasPackageDepChanges) {
         if (onlyDevDependencies) {
-          logMessage('⏭️  Only devDependency changes detected, skipping version check', 'warning');
+          logMessage('⏭️  Only devDependency changes detected, skipping version check', 'info');
         } else {
           logMessage(
             '⏭️  No JavaScript/TypeScript files or dependency changes detected, skipping version check',
