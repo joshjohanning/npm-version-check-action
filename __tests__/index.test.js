@@ -1664,6 +1664,158 @@ describe('hasPackageDependencyChanges', () => {
     expect(result).toEqual({ hasChanges: false, onlyDevDependencies: true });
   });
 
+  test('should attribute reshuffled packages nested under prod deps via package-name fallback', async () => {
+    const { hasPackageDependencyChanges } = indexModule;
+
+    // Reproduces the real-world scenario from organization-readme-badge-generator PR #74:
+    // A jest devDep bump causes npm to reshuffle ansi-regex. The changed copy lives at
+    // node_modules/cliui/node_modules/ansi-regex (nested under the production dep cliui).
+    // The exact-key tree walk from jest cannot reach this path because cliui is reached
+    // through the prod yargs chain, not the dev jest chain in this lockfile layout.
+    // The fallback checks that the package NAME "ansi-regex" appears elsewhere in the
+    // dev transitive set, confirming it's reshuffling rather than a new production dep.
+
+    const basePackageJson = {
+      name: 'my-org-tool',
+      version: '1.0.8',
+      dependencies: { yargs: '^17.0.0' },
+      devDependencies: { jest: '^29.0.0' }
+    };
+
+    const headPackageJson = {
+      name: 'my-org-tool',
+      version: '1.0.8',
+      dependencies: { yargs: '^17.0.0' },
+      devDependencies: { jest: '^30.3.0' }
+    };
+
+    const basePackageLock = {
+      name: 'my-org-tool',
+      version: '1.0.8',
+      lockfileVersion: 3,
+      packages: {
+        '': {
+          name: 'my-org-tool',
+          version: '1.0.8',
+          dependencies: { yargs: '^17.0.0' },
+          devDependencies: { jest: '^29.0.0' }
+        },
+        'node_modules/yargs': {
+          version: '17.7.2',
+          dependencies: { cliui: '^8.0.1' }
+        },
+        'node_modules/cliui': {
+          version: '8.0.1',
+          dependencies: { 'strip-ansi': '^6.0.1' }
+        },
+        'node_modules/cliui/node_modules/ansi-regex': {
+          version: '5.0.1'
+          // no dev: true - nested under prod dep cliui
+        },
+        'node_modules/cliui/node_modules/strip-ansi': {
+          version: '6.0.1',
+          dependencies: { 'ansi-regex': '^5.0.1' }
+        },
+        'node_modules/jest': {
+          version: '29.0.0',
+          dev: true,
+          dependencies: { 'jest-cli': '^29.0.0' }
+        },
+        'node_modules/jest-cli': {
+          version: '29.0.0',
+          dev: true,
+          dependencies: { chalk: '^4.0.0' }
+        },
+        'node_modules/jest-cli/node_modules/chalk': {
+          version: '4.1.2',
+          dev: true,
+          dependencies: { 'ansi-styles': '^4.0.0' }
+        },
+        // ansi-regex also exists as a transitive of jest (through a different path)
+        'node_modules/ansi-regex': {
+          version: '5.0.1',
+          dev: true
+        }
+      }
+    };
+
+    const headPackageLock = {
+      name: 'my-org-tool',
+      version: '1.0.8',
+      lockfileVersion: 3,
+      packages: {
+        '': {
+          name: 'my-org-tool',
+          version: '1.0.8',
+          dependencies: { yargs: '^17.0.0' },
+          devDependencies: { jest: '^30.3.0' }
+        },
+        'node_modules/yargs': {
+          version: '17.7.2',
+          dependencies: { cliui: '^8.0.1' }
+        },
+        'node_modules/cliui': {
+          version: '8.0.1',
+          dependencies: { 'strip-ansi': '^6.0.1' }
+        },
+        'node_modules/cliui/node_modules/ansi-regex': {
+          version: '5.0.2' // reshuffled - version changed but same package name
+          // no dev: true - nested under prod dep cliui
+        },
+        'node_modules/cliui/node_modules/strip-ansi': {
+          version: '6.0.1',
+          dependencies: { 'ansi-regex': '^5.0.1' }
+        },
+        'node_modules/jest': {
+          version: '30.3.0',
+          dev: true,
+          dependencies: { 'jest-cli': '^30.3.0' }
+        },
+        'node_modules/jest-cli': {
+          version: '30.3.0',
+          dev: true,
+          dependencies: { chalk: '^4.0.0' }
+        },
+        'node_modules/jest-cli/node_modules/chalk': {
+          version: '4.1.2',
+          dev: true,
+          dependencies: { 'ansi-styles': '^4.0.0', 'strip-ansi': '^6.0.0' }
+        },
+        // jest-cli/chalk now depends on strip-ansi which depends on ansi-regex
+        'node_modules/jest-cli/node_modules/strip-ansi': {
+          version: '6.0.1',
+          dev: true,
+          dependencies: { 'ansi-regex': '^5.0.1' }
+        },
+        'node_modules/jest-cli/node_modules/ansi-regex': {
+          version: '5.0.2',
+          dev: true
+        },
+        'node_modules/ansi-regex': {
+          version: '5.0.2',
+          dev: true
+        }
+      }
+    };
+
+    mockCore.getBooleanInput.mockImplementation(input => {
+      if (input === 'include-dev-dependencies') return false;
+      return false;
+    });
+
+    mockExec.exec.mockImplementation(
+      createExecMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock)
+    );
+
+    const result = await hasPackageDependencyChanges();
+
+    // node_modules/cliui/node_modules/ansi-regex changed and has no dev: true,
+    // but the package name "ansi-regex" appears in devTransitives (at other paths
+    // like node_modules/ansi-regex or jest-cli/node_modules/ansi-regex), so the
+    // name-based fallback correctly identifies this as reshuffling.
+    expect(result).toEqual({ hasChanges: false, onlyDevDependencies: true });
+  });
+
   test('should detect prod transitive changes even when package.json shows only devDependency changes', async () => {
     const { hasPackageDependencyChanges } = indexModule;
 

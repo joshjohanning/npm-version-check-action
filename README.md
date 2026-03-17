@@ -182,8 +182,8 @@ The action intelligently handles different types of file changes:
 When `include-dev-dependencies: false` (default) and only devDependencies change in package.json:
 
 - The action walks the dependency tree from each changed devDependency to identify which lockfile changes are attributable to the devDep update
-- Shared transitive dependencies (packages used by both production and dev trees) that get reshuffled by npm are correctly treated as dev-only changes
-- Lockfile changes to packages **not** reachable from any changed devDependency are still flagged as production changes (e.g., intentional transitive bumps for security fixes)
+- Shared transitive dependencies (packages used by both production and dev trees) that get reshuffled by npm are correctly treated as dev-only changes, even when npm nests them under production dependency paths (e.g., `node_modules/cliui/node_modules/ansi-regex`)
+- Lockfile changes to packages whose **name** does not appear anywhere in the dev dependency tree are still flagged as production changes (e.g., intentional transitive bumps for security fixes)
 - Much simpler and more reliable than trying to filter dev dependencies from complex lock file structures
 
 This intelligent approach prevents unnecessary version bumps when only non-functional changes are made.

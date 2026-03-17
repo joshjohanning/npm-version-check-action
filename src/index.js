@@ -605,6 +605,20 @@ function resolveDepKey(lockPackages, parentKey, depName) {
 }
 
 /**
+ * Extract the package name from a lockfile key.
+ * For 'node_modules/cliui/node_modules/ansi-regex' returns 'ansi-regex'.
+ * For 'node_modules/@scope/pkg' returns '@scope/pkg'.
+ * @param {string} lockfileKey - The lockfile package key
+ * @returns {string|null} The package name, or null if not a valid key
+ */
+function extractPackageName(lockfileKey) {
+  const prefix = 'node_modules/';
+  const lastNM = lockfileKey.lastIndexOf(prefix);
+  if (lastNM === -1) return null;
+  return lockfileKey.substring(lastNM + prefix.length);
+}
+
+/**
  * Walk the dependency tree in a lockfile's packages section to find all transitive
  * dependencies reachable from a set of starting packages.
  * Uses npm's node_modules resolution algorithm to handle nested and hoisted packages.
@@ -811,6 +825,15 @@ export async function hasPackageDependencyChanges(changedFiles = null) {
                   const baseTransitives = getTransitiveDeps(basePkgs, startKeys);
                   const devTransitives = new Set([...headTransitives, ...baseTransitives]);
 
+                  // Build a set of package names reachable from dev deps for
+                  // fallback reshuffling detection (npm may nest the same package
+                  // at a different path than the tree walk finds).
+                  const devTransitiveNames = new Set();
+                  for (const tKey of devTransitives) {
+                    const name = extractPackageName(tKey);
+                    if (name) devTransitiveNames.add(name);
+                  }
+
                   let hasNonAttributableChange = false;
                   for (const key of changedKeys) {
                     const headPkg = headPkgs[key];
@@ -819,6 +842,19 @@ export async function hasPackageDependencyChanges(changedFiles = null) {
                     if ((headPkg && headPkg.dev) || (!headPkg && basePkg && basePkg.dev)) continue;
 
                     if (!devTransitives.has(key)) {
+                      // Fallback: check if the package name (regardless of nesting path)
+                      // appears as a transitive of changed dev deps. This handles npm
+                      // reshuffling where a package is moved to a different node_modules
+                      // nesting level as a side-effect of a devDependency update.
+                      const pkgName = extractPackageName(key);
+                      if (pkgName && devTransitiveNames.has(pkgName)) {
+                        logMessage(
+                          `Debug: lockfile change at ${key} attributed to devDependency reshuffling (package name ${pkgName} found in dev transitives)`,
+                          'debug'
+                        );
+                        continue;
+                      }
+
                       logMessage(`Debug: lockfile change not attributable to devDependency update: ${key}`, 'debug');
                       hasNonAttributableChange = true;
                       break;
