@@ -568,9 +568,46 @@ function areAllChangesDevDependencies(baseLock, headLock, changedKeys) {
 }
 
 /**
+ * Resolve a dependency name to its lockfile key using npm's node_modules resolution algorithm.
+ * Given a parent package key and a dependency name, walks up the directory tree to find
+ * where npm installed the dependency (nested or hoisted).
+ * @param {Object} lockPackages - The packages section of a package-lock.json
+ * @param {string} parentKey - The lockfile key of the parent package (e.g., 'node_modules/jest/node_modules/chalk')
+ * @param {string} depName - The dependency name to resolve (e.g., 'ansi-regex')
+ * @returns {string|null} The lockfile key where the dependency is installed, or null if not found
+ */
+function resolveDepKey(lockPackages, parentKey, depName) {
+  // Try nested first: node_modules/jest/node_modules/chalk -> node_modules/jest/node_modules/chalk/node_modules/depName
+  // Then walk up: node_modules/jest/node_modules/depName, then node_modules/depName
+  let searchBase = parentKey;
+
+  while (searchBase) {
+    const candidate = `${searchBase}/node_modules/${depName}`;
+    if (lockPackages[candidate] !== undefined) {
+      return candidate;
+    }
+
+    // Walk up: strip the last /node_modules/xxx segment
+    const lastNM = searchBase.lastIndexOf('/node_modules/');
+    if (lastNM === -1) {
+      break;
+    }
+    searchBase = searchBase.substring(0, lastNM);
+  }
+
+  // Finally try top-level
+  const topLevel = `node_modules/${depName}`;
+  if (lockPackages[topLevel] !== undefined) {
+    return topLevel;
+  }
+
+  return null;
+}
+
+/**
  * Walk the dependency tree in a lockfile's packages section to find all transitive
  * dependencies reachable from a set of starting packages.
- * Used to determine if lockfile changes are attributable to specific dependency updates.
+ * Uses npm's node_modules resolution algorithm to handle nested and hoisted packages.
  * @param {Object} lockPackages - The packages section of a package-lock.json
  * @param {string[]} startKeys - Array of package keys to start walking from (e.g., ['node_modules/jest'])
  * @returns {Set<string>} Set of all reachable package keys including the start keys
@@ -578,9 +615,10 @@ function areAllChangesDevDependencies(baseLock, headLock, changedKeys) {
 function getTransitiveDeps(lockPackages, startKeys) {
   const visited = new Set();
   const queue = [...startKeys];
+  let i = 0;
 
-  while (queue.length > 0) {
-    const key = queue.shift();
+  while (i < queue.length) {
+    const key = queue[i++];
     if (visited.has(key)) continue;
     visited.add(key);
 
@@ -590,9 +628,9 @@ function getTransitiveDeps(lockPackages, startKeys) {
     // Follow dependencies and optionalDependencies to reach all transitives
     const deps = { ...(pkg.dependencies || {}), ...(pkg.optionalDependencies || {}) };
     for (const depName of Object.keys(deps)) {
-      const depKey = `node_modules/${depName}`;
-      if (!visited.has(depKey)) {
-        queue.push(depKey);
+      const resolvedKey = resolveDepKey(lockPackages, key, depName);
+      if (resolvedKey && !visited.has(resolvedKey)) {
+        queue.push(resolvedKey);
       }
     }
   }

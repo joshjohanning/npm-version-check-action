@@ -1384,20 +1384,21 @@ describe('hasPackageDependencyChanges', () => {
   test('should treat lockfile reshuffling as dev-only when package.json shows no production changes', async () => {
     const { hasPackageDependencyChanges } = indexModule;
 
-    // This reproduces a real-world scenario where updating a devDependency causes npm to
-    // reshuffle the lockfile tree (hoisting shared sub-dependencies). The hoisted packages
-    // do NOT have "dev": true because they are shared between prod and dev trees, but the
-    // actual change is dev-only per package.json.
+    // This reproduces the real-world scenario from PR #74: updating jest (devDep) causes npm
+    // to reshuffle shared transitive dependencies like ansi-regex/strip-ansi between the
+    // yargs (prod) and jest (dev) trees. The hoisted packages lack "dev": true because they
+    // are shared. The tree walk must follow the full chain: jest -> jest-cli -> yargs ->
+    // cliui -> wrap-ansi -> strip-ansi -> ansi-regex, handling nested node_modules resolution.
 
     // Base package.json
     const basePackageJson = {
       name: 'my-org-tool',
       version: '2.0.0',
       dependencies: {
-        '@octokit/rest': '^20.0.0'
+        yargs: '^17.0.0'
       },
       devDependencies: {
-        '@octokit/webhooks-types': '^7.1.0'
+        jest: '^29.0.0'
       }
     };
 
@@ -1406,14 +1407,14 @@ describe('hasPackageDependencyChanges', () => {
       name: 'my-org-tool',
       version: '2.0.0',
       dependencies: {
-        '@octokit/rest': '^20.0.0' // unchanged
+        yargs: '^17.0.0' // unchanged
       },
       devDependencies: {
-        '@octokit/webhooks-types': '^7.6.0' // bumped
+        jest: '^30.3.0' // bumped
       }
     };
 
-    // Base package-lock.json
+    // Base package-lock.json -- ansi-regex at v5.0.1, nested under cliui
     const basePackageLock = {
       name: 'my-org-tool',
       version: '2.0.0',
@@ -1423,38 +1424,51 @@ describe('hasPackageDependencyChanges', () => {
         '': {
           name: 'my-org-tool',
           version: '2.0.0',
-          dependencies: { '@octokit/rest': '^20.0.0' },
-          devDependencies: { '@octokit/webhooks-types': '^7.1.0' }
+          dependencies: { yargs: '^17.0.0' },
+          devDependencies: { jest: '^29.0.0' }
         },
-        'node_modules/@octokit/rest': {
-          version: '20.0.2',
-          resolved: 'https://registry.npmjs.org/@octokit/rest/-/rest-20.0.2.tgz',
-          integrity: 'sha512-rest',
-          dependencies: {
-            '@octokit/core': '^5.0.0'
-          }
+        'node_modules/yargs': {
+          version: '17.7.2',
+          resolved: 'https://registry.npmjs.org/yargs/-/yargs-17.7.2.tgz',
+          dependencies: { cliui: '^8.0.1' }
         },
-        'node_modules/@octokit/core': {
-          version: '5.0.0',
-          resolved: 'https://registry.npmjs.org/@octokit/core/-/core-5.0.0.tgz',
-          integrity: 'sha512-core50'
-          // No "dev": true -- shared sub-dependency of @octokit/rest (prod)
+        'node_modules/cliui': {
+          version: '8.0.1',
+          resolved: 'https://registry.npmjs.org/cliui/-/cliui-8.0.1.tgz',
+          dependencies: { 'wrap-ansi': '^7.0.0', 'strip-ansi': '^6.0.1' }
         },
-        'node_modules/@octokit/webhooks-types': {
-          version: '7.1.0',
-          resolved: 'https://registry.npmjs.org/@octokit/webhooks-types/-/webhooks-types-7.1.0.tgz',
-          integrity: 'sha512-wh71',
+        'node_modules/wrap-ansi': {
+          version: '7.0.0',
+          resolved: 'https://registry.npmjs.org/wrap-ansi/-/wrap-ansi-7.0.0.tgz',
+          dependencies: { 'strip-ansi': '^6.0.0' }
+        },
+        'node_modules/strip-ansi': {
+          version: '6.0.1',
+          resolved: 'https://registry.npmjs.org/strip-ansi/-/strip-ansi-6.0.1.tgz',
+          dependencies: { 'ansi-regex': '^5.0.1' }
+        },
+        'node_modules/ansi-regex': {
+          version: '5.0.1',
+          resolved: 'https://registry.npmjs.org/ansi-regex/-/ansi-regex-5.0.1.tgz'
+          // No dev: true -- shared between yargs (prod) and jest (dev)
+        },
+        'node_modules/jest': {
+          version: '29.0.0',
+          resolved: 'https://registry.npmjs.org/jest/-/jest-29.0.0.tgz',
           dev: true,
-          dependencies: {
-            '@octokit/core': '^5.0.0'
-          }
+          dependencies: { 'jest-cli': '^29.0.0' }
+        },
+        'node_modules/jest-cli': {
+          version: '29.0.0',
+          resolved: 'https://registry.npmjs.org/jest-cli/-/jest-cli-29.0.0.tgz',
+          dev: true,
+          dependencies: { yargs: '^17.0.0' }
         }
       }
     };
 
-    // Head package-lock.json - npm reshuffled the tree when updating the dev dependency.
-    // @octokit/core was re-resolved to a newer version (transitive dep of both rest and webhooks-types)
-    // but still lacks "dev": true because it is shared with the production @octokit/rest tree.
+    // Head package-lock.json -- jest bumped to 30.3.0, npm reshuffled ansi-regex to 6.2.2
+    // (now hoisted, version changed, still no dev: true because shared with yargs prod tree)
     const headPackageLock = {
       name: 'my-org-tool',
       version: '2.0.0',
@@ -1464,31 +1478,45 @@ describe('hasPackageDependencyChanges', () => {
         '': {
           name: 'my-org-tool',
           version: '2.0.0',
-          dependencies: { '@octokit/rest': '^20.0.0' },
-          devDependencies: { '@octokit/webhooks-types': '^7.6.0' }
+          dependencies: { yargs: '^17.0.0' },
+          devDependencies: { jest: '^30.3.0' }
         },
-        'node_modules/@octokit/rest': {
-          version: '20.0.2',
-          resolved: 'https://registry.npmjs.org/@octokit/rest/-/rest-20.0.2.tgz',
-          integrity: 'sha512-rest',
-          dependencies: {
-            '@octokit/core': '^5.0.0'
-          }
+        'node_modules/yargs': {
+          version: '17.7.2',
+          resolved: 'https://registry.npmjs.org/yargs/-/yargs-17.7.2.tgz',
+          dependencies: { cliui: '^8.0.1' }
         },
-        'node_modules/@octokit/core': {
-          version: '5.2.0', // version changed due to lockfile reshuffling
-          resolved: 'https://registry.npmjs.org/@octokit/core/-/core-5.2.0.tgz',
-          integrity: 'sha512-core52'
-          // Still no "dev": true -- shared between prod and dev trees
+        'node_modules/cliui': {
+          version: '8.0.1',
+          resolved: 'https://registry.npmjs.org/cliui/-/cliui-8.0.1.tgz',
+          dependencies: { 'wrap-ansi': '^7.0.0', 'strip-ansi': '^6.0.1' }
         },
-        'node_modules/@octokit/webhooks-types': {
-          version: '7.6.0',
-          resolved: 'https://registry.npmjs.org/@octokit/webhooks-types/-/webhooks-types-7.6.0.tgz',
-          integrity: 'sha512-wh76',
+        'node_modules/wrap-ansi': {
+          version: '7.0.0',
+          resolved: 'https://registry.npmjs.org/wrap-ansi/-/wrap-ansi-7.0.0.tgz',
+          dependencies: { 'strip-ansi': '^6.0.0' }
+        },
+        'node_modules/strip-ansi': {
+          version: '7.1.0', // version changed by reshuffling
+          resolved: 'https://registry.npmjs.org/strip-ansi/-/strip-ansi-7.1.0.tgz',
+          dependencies: { 'ansi-regex': '^6.0.0' }
+        },
+        'node_modules/ansi-regex': {
+          version: '6.2.2', // version changed by reshuffling
+          resolved: 'https://registry.npmjs.org/ansi-regex/-/ansi-regex-6.2.2.tgz'
+          // Still no dev: true -- shared between yargs (prod) and jest (dev)
+        },
+        'node_modules/jest': {
+          version: '30.3.0', // bumped
+          resolved: 'https://registry.npmjs.org/jest/-/jest-30.3.0.tgz',
           dev: true,
-          dependencies: {
-            '@octokit/core': '^5.0.0'
-          }
+          dependencies: { 'jest-cli': '^30.3.0' }
+        },
+        'node_modules/jest-cli': {
+          version: '30.3.0', // bumped
+          resolved: 'https://registry.npmjs.org/jest-cli/-/jest-cli-30.3.0.tgz',
+          dev: true,
+          dependencies: { yargs: '^17.0.0' }
         }
       }
     };
@@ -1506,6 +1534,133 @@ describe('hasPackageDependencyChanges', () => {
 
     // package.json shows only devDependencies changed, so the lockfile reshuffling
     // of shared packages (without dev: true) should NOT be treated as production changes
+    expect(result).toEqual({ hasChanges: false, onlyDevDependencies: true });
+  });
+
+  test('should handle nested node_modules keys when walking the dependency tree', async () => {
+    const { hasPackageDependencyChanges } = indexModule;
+
+    // Tests resolveDepKey with nested node_modules paths. jest-cli has a nested
+    // copy of chalk (different version), which itself depends on strip-ansi.
+    // The hoisted strip-ansi (shared with yargs, no dev: true) gets reshuffled.
+    // The tree walk must: 1) find the nested chalk via jest-cli, 2) from nested
+    // chalk find strip-ansi (resolving up to top-level), marking it reachable.
+
+    const basePackageJson = {
+      name: 'my-tool',
+      version: '1.0.0',
+      dependencies: { yargs: '^17.0.0' },
+      devDependencies: { jest: '^29.0.0' }
+    };
+
+    const headPackageJson = {
+      name: 'my-tool',
+      version: '1.0.0',
+      dependencies: { yargs: '^17.0.0' },
+      devDependencies: { jest: '^30.3.0' }
+    };
+
+    const basePackageLock = {
+      name: 'my-tool',
+      version: '1.0.0',
+      lockfileVersion: 3,
+      packages: {
+        '': {
+          name: 'my-tool',
+          version: '1.0.0',
+          dependencies: { yargs: '^17.0.0' },
+          devDependencies: { jest: '^29.0.0' }
+        },
+        'node_modules/yargs': {
+          version: '17.7.2',
+          resolved: 'https://registry.npmjs.org/yargs/-/yargs-17.7.2.tgz',
+          dependencies: { 'strip-ansi': '^6.0.0' }
+        },
+        'node_modules/strip-ansi': {
+          version: '6.0.1',
+          resolved: 'https://registry.npmjs.org/strip-ansi/-/strip-ansi-6.0.1.tgz'
+          // No dev: true -- shared between yargs (prod) and jest (dev) trees
+        },
+        'node_modules/jest': {
+          version: '29.0.0',
+          resolved: 'https://registry.npmjs.org/jest/-/jest-29.0.0.tgz',
+          dev: true,
+          dependencies: { 'jest-cli': '^29.0.0' }
+        },
+        'node_modules/jest-cli': {
+          version: '29.0.0',
+          resolved: 'https://registry.npmjs.org/jest-cli/-/jest-cli-29.0.0.tgz',
+          dev: true,
+          dependencies: { chalk: '^4.0.0' }
+        },
+        // jest-cli has its own nested chalk (different major than any top-level chalk)
+        'node_modules/jest-cli/node_modules/chalk': {
+          version: '4.1.2',
+          resolved: 'https://registry.npmjs.org/chalk/-/chalk-4.1.2.tgz',
+          dev: true,
+          dependencies: { 'strip-ansi': '^6.0.0' }
+        }
+      }
+    };
+
+    // After jest bump: nested chalk updated, and the shared top-level strip-ansi
+    // got reshuffled (new patch version, lost dev: true because shared with yargs)
+    const headPackageLock = {
+      name: 'my-tool',
+      version: '1.0.0',
+      lockfileVersion: 3,
+      packages: {
+        '': {
+          name: 'my-tool',
+          version: '1.0.0',
+          dependencies: { yargs: '^17.0.0' },
+          devDependencies: { jest: '^30.3.0' }
+        },
+        'node_modules/yargs': {
+          version: '17.7.2',
+          resolved: 'https://registry.npmjs.org/yargs/-/yargs-17.7.2.tgz',
+          dependencies: { 'strip-ansi': '^6.0.0' }
+        },
+        'node_modules/strip-ansi': {
+          version: '6.0.2', // reshuffled, new patch, no dev: true (shared)
+          resolved: 'https://registry.npmjs.org/strip-ansi/-/strip-ansi-6.0.2.tgz'
+        },
+        'node_modules/jest': {
+          version: '30.3.0',
+          resolved: 'https://registry.npmjs.org/jest/-/jest-30.3.0.tgz',
+          dev: true,
+          dependencies: { 'jest-cli': '^30.3.0' }
+        },
+        'node_modules/jest-cli': {
+          version: '30.3.0',
+          resolved: 'https://registry.npmjs.org/jest-cli/-/jest-cli-30.3.0.tgz',
+          dev: true,
+          dependencies: { chalk: '^4.0.0' }
+        },
+        'node_modules/jest-cli/node_modules/chalk': {
+          version: '4.1.3', // nested, changed version
+          resolved: 'https://registry.npmjs.org/chalk/-/chalk-4.1.3.tgz',
+          dev: true,
+          dependencies: { 'strip-ansi': '^6.0.0' }
+        }
+      }
+    };
+
+    mockCore.getBooleanInput.mockImplementation(input => {
+      if (input === 'include-dev-dependencies') return false;
+      return false;
+    });
+
+    mockExec.exec.mockImplementation(
+      createExecMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock)
+    );
+
+    const result = await hasPackageDependencyChanges();
+
+    // strip-ansi at top level (no dev: true, shared with yargs) changed version but
+    // is reachable via jest -> jest-cli -> nested chalk -> strip-ansi (resolving up
+    // to top-level via resolveDepKey). The nested chalk also changed but is dev: true.
+    // All changes should be attributed to the jest devDep update.
     expect(result).toEqual({ hasChanges: false, onlyDevDependencies: true });
   });
 
