@@ -1286,7 +1286,12 @@ export async function run() {
       const hasPackageDepChanges = packageDepResult.hasChanges;
       const onlyDevDependencies = packageDepResult.onlyDevDependencies;
 
-      if (!hasRegularChanges && !hasPackageDepChanges) {
+      // Check if action.yml changed (runtime check needs the version comparison to run)
+      const hasActionYmlChange =
+        !skipMajorOnActionsRuntimeChange &&
+        changedFiles.some(f => f === DEFAULT_ACTION_YML_PATH || f.endsWith(`/${DEFAULT_ACTION_YML_PATH}`));
+
+      if (!hasRegularChanges && !hasPackageDepChanges && !hasActionYmlChange) {
         if (onlyDevDependencies) {
           logMessage('⏭️  Only devDependency changes detected, skipping version check', 'notice');
         } else {
@@ -1305,6 +1310,9 @@ export async function run() {
         logMessage('✅ JavaScript/TypeScript file changes detected, proceeding with version check...');
         const relevantFiles = changedFiles.filter(file => isRelevantFile(file));
         logMessage(`Changed files: ${relevantFiles.join(', ')}`);
+      }
+      if (hasActionYmlChange && !hasRegularChanges && !hasPackageDepChanges) {
+        logMessage('✅ action.yml changes detected, proceeding with version check for runtime change...');
       }
     }
 

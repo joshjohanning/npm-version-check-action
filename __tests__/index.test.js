@@ -3872,6 +3872,98 @@ describe('npm Version Check Action - Integration Tests', () => {
       expect(mockCore.info).toHaveBeenCalledWith('🏁 Version check completed successfully');
     });
 
+    test('should proceed with version check when only action.yml changed and runtime check is enabled', async () => {
+      const { run } = indexModule;
+
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.1.0' }));
+
+      // Only action.yml changed - no JS/TS or package dependency changes
+      mockOctokit.paginate.mockResolvedValue([
+        { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Upgrade runtime' } }
+      ]);
+
+      mockOctokit.rest.repos.getCommit.mockResolvedValue({
+        data: { files: [{ filename: 'action.yml' }] }
+      });
+
+      const baseActionYml = `name: 'my-action'\nruns:\n  using: 'node20'\n  main: 'dist/index.js'\n`;
+      const headActionYml = `name: 'my-action'\nruns:\n  using: 'node24'\n  main: 'dist/index.js'\n`;
+
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('tag')) {
+          options.listeners.stdout('v1.0.0');
+        } else if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:action.yml`) {
+          options.listeners.stdout(Buffer.from(baseActionYml));
+        } else if (args.includes('show') && args[1] === `${TEST_HEAD_SHA}:action.yml`) {
+          options.listeners.stdout(Buffer.from(headActionYml));
+        } else if (args.includes('show') && args[1]?.includes('package.json')) {
+          options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
+        }
+        return 0;
+      });
+
+      mockSemver.compare.mockReturnValue(1); // Higher version (but only minor bump)
+
+      await run();
+
+      // Should NOT skip the check - action.yml change should trigger version check
+      expect(mockCore.info).toHaveBeenCalledWith(
+        '✅ action.yml changes detected, proceeding with version check for runtime change...'
+      );
+      // Should fail because runtime changed but no major version bump
+      expect(mockCore.setFailed).toHaveBeenCalledWith(
+        expect.stringContaining('action.yml Node.js runtime changed from node20 to node24')
+      );
+    });
+
+    test('should skip when only action.yml changed but runtime check is disabled', async () => {
+      const { run } = indexModule;
+
+      mockCore.getInput.mockImplementation(input => {
+        switch (input) {
+          case 'package-path':
+            return 'package.json';
+          case 'tag-prefix':
+            return 'v';
+          case 'skip-files-check':
+            return 'false';
+          case 'skip-major-on-actions-runtime-change':
+            return 'true';
+          case 'token':
+            return 'test-token';
+          case 'skip-version-keyword':
+            return '[skip version]';
+          default:
+            return '';
+        }
+      });
+
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.1.0' }));
+
+      // Only action.yml changed
+      mockOctokit.paginate.mockResolvedValue([
+        { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Upgrade runtime' } }
+      ]);
+
+      mockOctokit.rest.repos.getCommit.mockResolvedValue({
+        data: { files: [{ filename: 'action.yml' }] }
+      });
+
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('show') && args[1]?.includes('package.json')) {
+          options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
+        }
+        return 0;
+      });
+
+      await run();
+
+      // Should skip since runtime check is disabled and no other relevant files changed
+      expect(mockCore.notice).toHaveBeenCalledWith(
+        '⏭️  No JavaScript/TypeScript files or dependency changes detected, skipping version check'
+      );
+    });
+
     test('should handle general error in run function', async () => {
       const { run } = indexModule;
 
