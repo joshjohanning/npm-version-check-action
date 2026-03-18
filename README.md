@@ -10,6 +10,10 @@
 
 This action prevents developers from forgetting to bump package.json version before merging PRs that contain code changes, which would cause publishing issues later.
 
+## What's new
+
+Please refer to the [release page](https://github.com/joshjohanning/npm-version-check-action/releases) for the latest release notes.
+
 ## ✨ Features
 
 - 🎯 **Smart file detection** - Only runs when JavaScript/TypeScript/package files are modified
@@ -47,15 +51,15 @@ jobs:
   version-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
-      - uses: joshjohanning/npm-version-check-action@v1
+      - uses: joshjohanning/npm-version-check-action@v2
 ```
 
 ### Advanced Configuration
 
 ```yaml
-- uses: joshjohanning/npm-version-check-action@v1
+- uses: joshjohanning/npm-version-check-action@v2
   with:
     package-path: 'packages/core/package.json' # Custom package.json path
     tag-prefix: 'v' # Tag prefix (default: 'v')
@@ -82,18 +86,18 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Check version increment
-        uses: joshjohanning/npm-version-check-action@v1
+        uses: joshjohanning/npm-version-check-action@v2
         with:
           package-path: 'package.json'
           tag-prefix: 'v'
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies
@@ -128,7 +132,7 @@ jobs:
 ```yaml
 - name: Check version
   id: version-check
-  uses: joshjohanning/npm-version-check-action@v1
+  uses: joshjohanning/npm-version-check-action@v2
 
 - name: Print version info
   run: |
@@ -204,11 +208,11 @@ This intelligent approach prevents unnecessary version bumps when only non-funct
 For monorepos with multiple packages:
 
 ```yaml
-- uses: joshjohanning/npm-version-check-action@v1
+- uses: joshjohanning/npm-version-check-action@v2
   with:
     package-path: 'packages/frontend/package.json'
 
-- uses: joshjohanning/npm-version-check-action@v1
+- uses: joshjohanning/npm-version-check-action@v2
   with:
     package-path: 'packages/backend/package.json'
 ```
@@ -218,7 +222,7 @@ For monorepos with multiple packages:
 If your tags don't use the `v` prefix:
 
 ```yaml
-- uses: joshjohanning/npm-version-check-action@v1
+- uses: joshjohanning/npm-version-check-action@v2
   with:
     tag-prefix: 'release-' # For tags like 'release-1.0.0'
 ```
@@ -228,7 +232,7 @@ If your tags don't use the `v` prefix:
 To always validate version regardless of changed files:
 
 ```yaml
-- uses: joshjohanning/npm-version-check-action@v1
+- uses: joshjohanning/npm-version-check-action@v2
   with:
     skip-files-check: 'true'
 ```
@@ -240,7 +244,7 @@ By default, `devDependencies` changes don't trigger version bump requirements si
 #### Default Behavior (Ignore DevDependencies) - Recommended
 
 ```yaml
-- uses: joshjohanning/npm-version-check-action@v1
+- uses: joshjohanning/npm-version-check-action@v2
   with:
     include-dev-dependencies: 'false' # Default - devDeps don't require version bump
 ```
@@ -256,7 +260,7 @@ By default, `devDependencies` changes don't trigger version bump requirements si
 For libraries where build tools/devDependencies can affect the published package:
 
 ```yaml
-- uses: joshjohanning/npm-version-check-action@v1
+- uses: joshjohanning/npm-version-check-action@v2
   with:
     include-dev-dependencies: 'true' # devDeps changes require version bump
 ```
@@ -310,12 +314,12 @@ You can customize the skip keyword or disable this feature entirely:
 
 ```yaml
 # Use a custom keyword
-- uses: joshjohanning/npm-version-check-action@v1
+- uses: joshjohanning/npm-version-check-action@v2
   with:
     skip-version-keyword: '[no bump]'
 
 # Disable skip functionality entirely
-- uses: joshjohanning/npm-version-check-action@v1
+- uses: joshjohanning/npm-version-check-action@v2
   with:
     skip-version-keyword: ''
 ```
