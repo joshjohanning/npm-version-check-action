@@ -440,6 +440,20 @@ describe('npm Version Check Action - Helper Functions', () => {
       expect(parseNodeRuntime(`runs:\n  using: 'node12'\n`)).toBe(12);
       expect(parseNodeRuntime(`runs:\n  using: 'node16'\n`)).toBe(16);
     });
+
+    test('should ignore commented-out using lines', () => {
+      const { parseNodeRuntime } = indexModule;
+
+      const content = `name: 'my-action'\nruns:\n  # using: 'node20'\n  using: 'node24'\n  main: 'dist/index.js'\n`;
+      expect(parseNodeRuntime(content)).toBe(24);
+    });
+
+    test('should return null when using is only in a comment', () => {
+      const { parseNodeRuntime } = indexModule;
+
+      const content = `name: 'my-action'\nruns:\n  # using: 'node20'\n  main: 'dist/index.js'\n`;
+      expect(parseNodeRuntime(content)).toBeNull();
+    });
   });
 
   describe('isMajorVersionBump', () => {
@@ -3906,9 +3920,9 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       await run();
 
-      // Should NOT skip the check - action.yml change should trigger version check
+      // Should NOT skip the check - action.yml runtime change should trigger version check
       expect(mockCore.info).toHaveBeenCalledWith(
-        '✅ action.yml changes detected, proceeding with version check for runtime change...'
+        '✅ action.yml Node.js runtime change detected, proceeding with version check...'
       );
       // Should fail because runtime changed but no major version bump
       expect(mockCore.setFailed).toHaveBeenCalledWith(
@@ -3964,8 +3978,52 @@ describe('npm Version Check Action - Integration Tests', () => {
       );
     });
 
+    test('should skip when only action.yml metadata changed without runtime change', async () => {
+      const { run } = indexModule;
+
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.1.0' }));
+
+      // Only action.yml changed but runtime is the same
+      mockOctokit.paginate.mockResolvedValue([
+        { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Update description' } }
+      ]);
+
+      mockOctokit.rest.repos.getCommit.mockResolvedValue({
+        data: { files: [{ filename: 'action.yml' }] }
+      });
+
+      const actionYml = `name: 'my-action'\nruns:\n  using: 'node20'\n  main: 'dist/index.js'\n`;
+
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('show') && args[1]?.includes('action.yml')) {
+          options.listeners.stdout(Buffer.from(actionYml));
+        } else if (args.includes('show') && args[1]?.includes('package.json')) {
+          options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
+        }
+        return 0;
+      });
+
+      await run();
+
+      // Should skip since runtime didn't actually change
+      expect(mockCore.notice).toHaveBeenCalledWith(
+        '⏭️  No JavaScript/TypeScript files or dependency changes detected, skipping version check'
+      );
+      expect(mockCore.setFailed).not.toHaveBeenCalled();
+    });
+
     test('should handle general error in run function', async () => {
       const { run } = indexModule;
+
+      // Skip files check so we proceed directly to getLatestVersionTag which will throw
+      mockCore.getInput.mockImplementation(input => {
+        switch (input) {
+          case 'skip-files-check':
+            return 'true';
+          default:
+            return '';
+        }
+      });
 
       // Mock fetchTags to throw an error that propagates up
       mockExec.exec.mockRejectedValue(new Error('Git command failed'));

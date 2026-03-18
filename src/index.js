@@ -42,8 +42,6 @@ const PACKAGE_LOCK_JSON_FILENAME = 'package-lock.json';
 const PACKAGE_FILENAMES = [PACKAGE_JSON_FILENAME, PACKAGE_LOCK_JSON_FILENAME];
 
 // Node runtime detection constants
-// Matches 'using: nodeNN' within a runs: block, handling \r\n and flexible key ordering
-const NODE_RUNTIME_USING_PATTERN = /using:[^\S\r\n]*['"]?(node(\d+))['"]?/;
 const RUNS_BLOCK_PATTERN = /^runs[^\S\r\n]*:/m;
 const DEFAULT_ACTION_YML_PATH = 'action.yml';
 
@@ -955,7 +953,11 @@ export function parseNodeRuntime(content) {
     // Stop at the next top-level key (non-empty, non-comment, no leading whitespace, has a colon)
     if (/^[a-zA-Z]/.test(line) && line.includes(':')) break;
 
-    const usingMatch = line.match(NODE_RUNTIME_USING_PATTERN);
+    // Skip YAML comments
+    if (line.trimStart().startsWith('#')) continue;
+
+    // Only match the using key at the start of the line (with indentation)
+    const usingMatch = line.match(/^\s+using:[^\S\r\n]*['"]?(node(\d+))['"]?/);
     if (usingMatch) {
       const version = parseInt(usingMatch[2], 10);
       return isNaN(version) ? null : version;
@@ -1286,12 +1288,23 @@ export async function run() {
       const hasPackageDepChanges = packageDepResult.hasChanges;
       const onlyDevDependencies = packageDepResult.onlyDevDependencies;
 
-      // Check if action.yml changed (runtime check needs the version comparison to run)
-      const hasActionYmlChange =
-        !skipMajorOnActionsRuntimeChange &&
-        changedFiles.some(f => f === DEFAULT_ACTION_YML_PATH || f.endsWith(`/${DEFAULT_ACTION_YML_PATH}`));
+      // Check if action.yml has an actual runtime change (not just metadata edits)
+      let hasRuntimeChange = false;
+      if (!skipMajorOnActionsRuntimeChange) {
+        const actionYmlChanged = changedFiles.some(
+          f => f === DEFAULT_ACTION_YML_PATH || f.endsWith(`/${DEFAULT_ACTION_YML_PATH}`)
+        );
+        if (actionYmlChanged) {
+          const baseRef = github.context.payload.pull_request?.base?.sha;
+          const headRef = github.context.sha;
+          if (baseRef && headRef) {
+            const earlyRuntimeCheck = await detectNodeRuntimeChange(baseRef, headRef, DEFAULT_ACTION_YML_PATH);
+            hasRuntimeChange = earlyRuntimeCheck.changed;
+          }
+        }
+      }
 
-      if (!hasRegularChanges && !hasPackageDepChanges && !hasActionYmlChange) {
+      if (!hasRegularChanges && !hasPackageDepChanges && !hasRuntimeChange) {
         if (onlyDevDependencies) {
           logMessage('⏭️  Only devDependency changes detected, skipping version check', 'notice');
         } else {
@@ -1311,8 +1324,8 @@ export async function run() {
         const relevantFiles = changedFiles.filter(file => isRelevantFile(file));
         logMessage(`Changed files: ${relevantFiles.join(', ')}`);
       }
-      if (hasActionYmlChange && !hasRegularChanges && !hasPackageDepChanges) {
-        logMessage('✅ action.yml changes detected, proceeding with version check for runtime change...');
+      if (hasRuntimeChange && !hasRegularChanges && !hasPackageDepChanges) {
+        logMessage('✅ action.yml Node.js runtime change detected, proceeding with version check...');
       }
     }
 
