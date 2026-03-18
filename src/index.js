@@ -1193,7 +1193,7 @@ export async function run() {
         } else {
           logMessage(
             '⏭️  No JavaScript/TypeScript files or dependency changes detected, skipping version check',
-            'warning'
+            'notice'
           );
         }
         return;
