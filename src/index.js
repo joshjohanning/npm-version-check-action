@@ -639,8 +639,9 @@ function getTransitiveDeps(lockPackages, startKeys) {
     const pkg = lockPackages[key];
     if (!pkg) continue;
 
-    // Follow dependencies and optionalDependencies to reach all transitives
-    const deps = { ...(pkg.dependencies || {}), ...(pkg.optionalDependencies || {}) };
+    // Follow dependencies, optionalDependencies, and peerDependencies to reach all transitives.
+    // npm v7+ auto-installs peerDependencies, so they can be reshuffled by devDep updates.
+    const deps = { ...(pkg.dependencies || {}), ...(pkg.optionalDependencies || {}), ...(pkg.peerDependencies || {}) };
     for (const depName of Object.keys(deps)) {
       const resolvedKey = resolveDepKey(lockPackages, key, depName);
       if (resolvedKey && !visited.has(resolvedKey)) {

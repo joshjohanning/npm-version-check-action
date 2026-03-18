@@ -1414,7 +1414,7 @@ describe('hasPackageDependencyChanges', () => {
       }
     };
 
-    // Base package-lock.json -- ansi-regex at v5.0.1, nested under cliui
+    // Base package-lock.json -- ansi-regex at v5.0.1, hoisted at top level (shared between yargs and jest trees)
     const basePackageLock = {
       name: 'my-org-tool',
       version: '2.0.0',
