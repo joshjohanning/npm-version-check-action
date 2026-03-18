@@ -28,7 +28,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Check version (default - ignores devDependencies)
-        uses: joshjohanning/npm-version-check-action@v1
+        uses: joshjohanning/npm-version-check-action@v2
         with:
           package-path: 'package.json'
           tag-prefix: 'v'
@@ -48,7 +48,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Check version (strict - includes devDependencies)
-        uses: joshjohanning/npm-version-check-action@v1
+        uses: joshjohanning/npm-version-check-action@v2
         with:
           package-path: 'package.json'
           tag-prefix: 'v'
@@ -71,7 +71,7 @@ jobs:
       # Build tools, transpilers, bundlers can change the published package
       - name: Check library version (include devDependencies)
         if: contains(github.event.pull_request.changed_files, 'packages/lib/')
-        uses: joshjohanning/npm-version-check-action@v1
+        uses: joshjohanning/npm-version-check-action@v2
         with:
           package-path: 'packages/lib/package.json'
           tag-prefix: 'lib-v'
@@ -82,7 +82,7 @@ jobs:
       # Test runners, linters, dev servers don't change the deployed application
       - name: Check app version (ignore devDependencies)
         if: contains(github.event.pull_request.changed_files, 'packages/app/')
-        uses: joshjohanning/npm-version-check-action@v1
+        uses: joshjohanning/npm-version-check-action@v2
         with:
           package-path: 'packages/app/package.json'
           tag-prefix: 'app-v'
@@ -92,7 +92,7 @@ jobs:
       # Example: Documentation site that uses build tools
       - name: Check docs version (include devDependencies for build tools)
         if: contains(github.event.pull_request.changed_files, 'packages/docs/')
-        uses: joshjohanning/npm-version-check-action@v1
+        uses: joshjohanning/npm-version-check-action@v2
         with:
           package-path: 'packages/docs/package.json'
           tag-prefix: 'docs-v'

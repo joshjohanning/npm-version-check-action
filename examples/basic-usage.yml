@@ -17,7 +17,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Check npm version increment
-        uses: joshjohanning/npm-version-check-action@v1
+        uses: joshjohanning/npm-version-check-action@v2
         with:
           package-path: 'package.json'
           tag-prefix: 'v'
