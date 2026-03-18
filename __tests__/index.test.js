@@ -3426,7 +3426,7 @@ describe('npm Version Check Action - Integration Tests', () => {
       // Should log that all commits were skipped
       expect(mockCore.notice).toHaveBeenCalledWith('⏭️  Skipped 2 of 2 commits containing "[skip version]"');
       // When all files are skipped, changedFiles is empty so no relevant changes detected
-      expect(mockCore.warning).toHaveBeenCalledWith(
+      expect(mockCore.notice).toHaveBeenCalledWith(
         '⏭️  No JavaScript/TypeScript files or dependency changes detected, skipping version check'
       );
     });
