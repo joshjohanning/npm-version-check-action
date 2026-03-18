@@ -26,7 +26,7 @@ Please refer to the [release page](https://github.com/joshjohanning/npm-version-
 - 🚀 **Shallow clone compatible** - Automatically fetches tags, works with default checkout
 - 🎉 **First release support** - Gracefully handles repositories with no previous tags
 - 🚀 **JavaScript action** - Fast execution with Node.js runtime
-- 🔄 **Node.js runtime change detection** - Requires a major version bump when `action.yml` changes its Node.js runtime (e.g., `node20` to `node24`)
+- 🔄 **Node.js Actions runtime change detection** - Requires a major version bump when `action.yml` changes its Node.js Actions runtime (e.g., `node20` to `node24`)
 - 📝 **Clear messaging** - Provides detailed success/error messages with emojis
 - ⚙️ **Configurable** - Supports custom package.json paths, tag prefixes, and dependency policies
 
@@ -110,25 +110,25 @@ jobs:
 
 ## 📥 Inputs
 
-| Input                                  | Description                                                                                      | Required | Default               |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------ | -------- | --------------------- |
-| `package-path`                         | Path to package.json file (relative to repository root)                                          | No       | `package.json`        |
-| `tag-prefix`                           | Prefix for version tags (e.g., "v" for v1.0.0)                                                   | No       | `v`                   |
-| `skip-files-check`                     | Skip checking if JS/package files changed (always run version check)                             | No       | `false`               |
-| `include-dev-dependencies`             | Whether devDependency changes should trigger version bump requirement                            | No       | `false`               |
-| `skip-version-keyword`                 | Keyword in commit messages to skip version check for that commit's files. Set to `''` to disable | No       | `[skip version]`      |
-| `skip-version-consistency-check`       | Skip the check that validates package.json and package-lock.json have matching versions          | No       | `false`               |
-| `skip-major-on-actions-runtime-change` | Skip the check that requires a major version bump when `action.yml` changes its Node.js runtime  | No       | `false`               |
-| `token`                                | GitHub token for API access (required for `skip-version-keyword` to analyze commits)             | No       | `${{ github.token }}` |
+| Input                                  | Description                                                                                             | Required | Default               |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------- | -------- | --------------------- |
+| `package-path`                         | Path to package.json file (relative to repository root)                                                 | No       | `package.json`        |
+| `tag-prefix`                           | Prefix for version tags (e.g., "v" for v1.0.0)                                                          | No       | `v`                   |
+| `skip-files-check`                     | Skip checking if JS/package files changed (always run version check)                                    | No       | `false`               |
+| `include-dev-dependencies`             | Whether devDependency changes should trigger version bump requirement                                   | No       | `false`               |
+| `skip-version-keyword`                 | Keyword in commit messages to skip version check for that commit's files. Set to `''` to disable        | No       | `[skip version]`      |
+| `skip-version-consistency-check`       | Skip the check that validates package.json and package-lock.json have matching versions                 | No       | `false`               |
+| `skip-major-on-actions-runtime-change` | Skip the check that requires a major version bump when `action.yml` changes its Node.js Actions runtime | No       | `false`               |
+| `token`                                | GitHub token for API access (required for `skip-version-keyword` to analyze commits)                    | No       | `${{ github.token }}` |
 
 ## 📤 Outputs
 
-| Output             | Description                                                                |
-| ------------------ | -------------------------------------------------------------------------- |
-| `version-changed`  | Whether the version was changed (`true`/`false`)                           |
-| `current-version`  | Current version from package.json                                          |
-| `previous-version` | Previous version from latest git tag                                       |
-| `runtime-changed`  | Whether the Node.js runtime version in action.yml changed (`true`/`false`) |
+| Output             | Description                                                                        |
+| ------------------ | ---------------------------------------------------------------------------------- |
+| `version-changed`  | Whether the version was changed (`true`/`false`)                                   |
+| `current-version`  | Current version from package.json                                                  |
+| `previous-version` | Previous version from latest git tag                                               |
+| `runtime-changed`  | Whether the Node.js Actions runtime version in action.yml changed (`true`/`false`) |
 
 ### Using Outputs
 
@@ -158,7 +158,7 @@ jobs:
 4. **Version Extraction**: Reads the current version from `package.json`
 5. **Tag Comparison**: Fetches the latest git tag and compares versions
 6. **Semantic Validation**: Ensures the new version is higher than the previous release
-7. **Runtime Change Detection**: Checks if `action.yml` changed its Node.js runtime and requires a major version bump
+7. **Runtime Change Detection**: Checks if `action.yml` changed its Node.js Actions runtime and requires a major version bump
 8. **Clear Feedback**: Provides success or error messages with actionable hints
 
 ### Smart File Detection
@@ -349,9 +349,9 @@ Ensure your `package.json` has a valid `version` field:
 
 The action automatically fetches git tags to work with shallow clones. If this warning appears, it means there was an issue fetching tags, but the action will continue with limited functionality. This is rare and usually indicates network or permission issues.
 
-### Node.js Runtime Change Detection
+### Node.js Actions Runtime Change Detection
 
-When `skip-major-on-actions-runtime-change` is `false` (default), the action compares the `runs.using` field in `action.yml` between the base and head of the PR. If the Node.js runtime version changes (e.g., `node20` to `node24`), a **major** version bump is required.
+When `skip-major-on-actions-runtime-change` is `false` (default), the action compares the `runs.using` field in `action.yml` between the base and head of the PR. If the Node.js Actions runtime version changes (e.g., `node20` to `node24`), a **major** version bump is required.
 
 This follows the convention used by popular GitHub Actions (like `actions/checkout`, `actions/setup-node`, etc.) where runtime upgrades are treated as breaking changes since they may affect consumers who pin to specific major versions.
 

@@ -31,7 +31,7 @@ inputs:
     required: false
     default: 'false'
   skip-major-on-actions-runtime-change:
-    description: 'Skip the check that requires a major version bump when action.yml changes its Node.js runtime version (runs.using). Default (false) enforces major bumps for runtime changes since they are breaking changes for action consumers.'
+    description: 'Skip the check that requires a major version bump when action.yml changes its Node.js Actions runtime version (runs.using). Default (false) enforces major bumps for runtime changes since they are breaking changes for action consumers.'
     required: false
     default: 'false'
   token:
@@ -47,7 +47,7 @@ outputs:
   previous-version:
     description: 'Previous version from latest git tag'
   runtime-changed:
-    description: 'Whether the Node.js runtime version in action.yml was changed'
+    description: 'Whether the Node.js Actions runtime version in action.yml was changed'
 
 runs:
   using: 'node24'

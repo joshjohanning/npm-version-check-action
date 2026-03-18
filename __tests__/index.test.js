@@ -3070,7 +3070,7 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       const commits = await getCommitsWithMessages(null);
       expect(commits).toEqual([]);
-      expect(mockCore.warning).toHaveBeenCalledWith('⚠️  No token provided, cannot fetch PR commits via API');
+      expect(mockCore.warning).toHaveBeenCalledWith('⚠️ No token provided, cannot fetch PR commits via API');
     });
 
     test('should return empty array when PR number is missing', async () => {
@@ -3080,7 +3080,7 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       const commits = await getCommitsWithMessages('test-token');
       expect(commits).toEqual([]);
-      expect(mockCore.warning).toHaveBeenCalledWith('⚠️  Could not determine PR number');
+      expect(mockCore.warning).toHaveBeenCalledWith('⚠️ Could not determine PR number');
     });
 
     test('should return empty array when API call fails', async () => {
@@ -3090,7 +3090,7 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       const commits = await getCommitsWithMessages('test-token');
       expect(commits).toEqual([]);
-      expect(mockCore.warning).toHaveBeenCalledWith('⚠️  Could not fetch PR commits via API: API rate limit exceeded');
+      expect(mockCore.warning).toHaveBeenCalledWith('⚠️ Could not fetch PR commits via API: API rate limit exceeded');
     });
   });
 
@@ -3147,7 +3147,7 @@ describe('npm Version Check Action - Integration Tests', () => {
         'test-repo'
       );
       expect(files).toEqual([]);
-      expect(mockCore.warning).toHaveBeenCalledWith('⚠️  Could not fetch files for commit abc1234: Not found');
+      expect(mockCore.warning).toHaveBeenCalledWith('⚠️ Could not fetch files for commit abc1234: Not found');
     });
   });
 
@@ -3696,7 +3696,7 @@ describe('npm Version Check Action - Integration Tests', () => {
       await run();
 
       expect(mockCore.setFailed).toHaveBeenCalledWith(
-        expect.stringContaining('action.yml Node.js runtime changed from node20 to node24')
+        expect.stringContaining('action.yml Node.js Actions runtime changed from node20 to node24')
       );
       expect(mockCore.setFailed).toHaveBeenCalledWith(expect.stringContaining('requires a MAJOR version bump'));
       expect(mockCore.notice).toHaveBeenCalledWith(expect.stringContaining(`Run 'npm version major'`));
@@ -3737,7 +3737,7 @@ describe('npm Version Check Action - Integration Tests', () => {
       await run();
 
       expect(mockCore.info).toHaveBeenCalledWith(
-        '✅ Major version bump detected for Node.js runtime change (node20 -> node24)'
+        '✅ Major version bump detected for Node.js Actions runtime change (node20 -> node24)'
       );
       expect(mockCore.setOutput).toHaveBeenCalledWith('runtime-changed', 'true');
       expect(mockCore.info).toHaveBeenCalledWith('🏁 Version check completed successfully');
@@ -3922,11 +3922,11 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       // Should NOT skip the check - action.yml runtime change should trigger version check
       expect(mockCore.info).toHaveBeenCalledWith(
-        '✅ action.yml Node.js runtime change detected, proceeding with version check...'
+        '✅ action.yml Node.js Actions runtime change detected, proceeding with version check...'
       );
       // Should fail because runtime changed but no major version bump
       expect(mockCore.setFailed).toHaveBeenCalledWith(
-        expect.stringContaining('action.yml Node.js runtime changed from node20 to node24')
+        expect.stringContaining('action.yml Node.js Actions runtime changed from node20 to node24')
       );
     });
 
@@ -3974,7 +3974,7 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       // Should skip since runtime check is disabled and no other relevant files changed
       expect(mockCore.notice).toHaveBeenCalledWith(
-        '⏭️  No JavaScript/TypeScript files or dependency changes detected, skipping version check'
+        '⏭️ No JavaScript/TypeScript files or dependency changes detected, skipping version check'
       );
     });
 
@@ -4007,7 +4007,7 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       // Should skip since runtime didn't actually change
       expect(mockCore.notice).toHaveBeenCalledWith(
-        '⏭️  No JavaScript/TypeScript files or dependency changes detected, skipping version check'
+        '⏭️ No JavaScript/TypeScript files or dependency changes detected, skipping version check'
       );
       expect(mockCore.setFailed).not.toHaveBeenCalled();
     });
@@ -4110,10 +4110,10 @@ describe('npm Version Check Action - Integration Tests', () => {
       await run();
 
       // Should log that all commits were skipped
-      expect(mockCore.notice).toHaveBeenCalledWith('⏭️  Skipped 2 of 2 commits containing "[skip version]"');
+      expect(mockCore.notice).toHaveBeenCalledWith('⏭️ Skipped 2 of 2 commits containing "[skip version]"');
       // When all files are skipped, changedFiles is empty so no relevant changes detected
       expect(mockCore.notice).toHaveBeenCalledWith(
-        '⏭️  No JavaScript/TypeScript files or dependency changes detected, skipping version check'
+        '⏭️ No JavaScript/TypeScript files or dependency changes detected, skipping version check'
       );
     });
 
@@ -4166,7 +4166,7 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       // Should log that consistency check was skipped
       expect(mockCore.info).toHaveBeenCalledWith(
-        '⏭️  Skipping version consistency check (skip-version-consistency-check: true)'
+        '⏭️ Skipping version consistency check (skip-version-consistency-check: true)'
       );
       // Should NOT fail due to version mismatch
       expect(mockCore.setFailed).not.toHaveBeenCalledWith(expect.stringContaining('Version mismatch'));
