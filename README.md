@@ -26,8 +26,8 @@ Please refer to the [release page](https://github.com/joshjohanning/npm-version-
 - 🚀 **Shallow clone compatible** - Automatically fetches tags, works with default checkout
 - 🎉 **First release support** - Gracefully handles repositories with no previous tags
 - 🚀 **JavaScript action** - Fast execution with Node.js runtime
-- � **Node.js runtime change detection** - Requires a major version bump when `action.yml` changes its Node.js runtime (e.g., `node20` to `node24`)
-- �📝 **Clear messaging** - Provides detailed success/error messages with emojis
+- 🔄 **Node.js runtime change detection** - Requires a major version bump when `action.yml` changes its Node.js runtime (e.g., `node20` to `node24`)
+- 📝 **Clear messaging** - Provides detailed success/error messages with emojis
 - ⚙️ **Configurable** - Supports custom package.json paths, tag prefixes, and dependency policies
 
 ## 📋 Requirements
