@@ -42,7 +42,7 @@ const PACKAGE_LOCK_JSON_FILENAME = 'package-lock.json';
 const PACKAGE_FILENAMES = [PACKAGE_JSON_FILENAME, PACKAGE_LOCK_JSON_FILENAME];
 
 // Node runtime detection constants
-const NODE_RUNTIME_PATTERN = /runs:\s*\n\s+using:\s*['"]?(node(\d+))['"]?/;
+const NODE_RUNTIME_PATTERN = /runs:[^\S\n]*\n[^\S\n]+using:[^\S\n]*['"]?(node(\d+))['"]?/;
 const DEFAULT_ACTION_YML_PATH = 'action.yml';
 
 /**
