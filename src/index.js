@@ -263,13 +263,13 @@ export async function getCommitsWithMessages(token) {
 
   const prNumber = context.payload.pull_request?.number;
   if (!prNumber) {
-    logMessage('⚠️  Could not determine PR number', 'warning');
+    logMessage('⚠️ Could not determine PR number', 'warning');
     return [];
   }
 
   // Use GitHub API to get commits - works with shallow clones
   if (!token) {
-    logMessage('⚠️  No token provided, cannot fetch PR commits via API', 'warning');
+    logMessage('⚠️ No token provided, cannot fetch PR commits via API', 'warning');
     return [];
   }
 
@@ -290,7 +290,7 @@ export async function getCommitsWithMessages(token) {
       message: commit.commit.message // Full commit message for keyword matching
     }));
   } catch (error) {
-    logMessage(`⚠️  Could not fetch PR commits via API: ${error.message}`, 'warning');
+    logMessage(`⚠️ Could not fetch PR commits via API: ${error.message}`, 'warning');
     return [];
   }
 }
@@ -315,7 +315,7 @@ export async function getFilesForCommit(sha, octokit, owner, repo) {
 
     return commit.files ? commit.files.map(f => f.filename) : [];
   } catch (error) {
-    logMessage(`⚠️  Could not fetch files for commit ${sha.substring(0, 7)}: ${error.message}`, 'warning');
+    logMessage(`⚠️ Could not fetch files for commit ${sha.substring(0, 7)}: ${error.message}`, 'warning');
     return [];
   }
 }
@@ -348,7 +348,7 @@ export async function getChangedFilesWithSkipSupport(skipKeyword, token) {
 
     if (shouldSkip) {
       skippedCommits++;
-      logMessage(`⏭️  Skipping commit ${commit.sha.substring(0, 7)}: "${commit.message}"`, 'debug');
+      logMessage(`⏭️ Skipping commit ${commit.sha.substring(0, 7)}: "${commit.message}"`, 'debug');
     } else {
       nonSkippedCommits.push(commit);
     }
@@ -1093,7 +1093,7 @@ export function validatePackageVersionConsistency(packagePath) {
     // Check if package-lock.json exists
     if (!fs.existsSync(lockPath)) {
       // package-lock.json doesn't exist - this is acceptable, some projects don't use it
-      logMessage('ℹ️  No package-lock.json found, skipping version consistency check', 'debug');
+      logMessage('ℹ️ No package-lock.json found, skipping version consistency check', 'debug');
       return result;
     }
 
@@ -1184,12 +1184,12 @@ export function compareVersions(current, previous) {
  */
 export async function fetchTags() {
   try {
-    logMessage('🏷️  Fetching git tags...');
+    logMessage('🏷️ Fetching git tags...');
     await execGit(['fetch', '--tags']);
     logMessage('✅ Git tags fetched successfully');
   } catch (error) {
     core.warning(`Could not fetch git tags: ${error.message}. Some version comparisons may be limited.`);
-    logMessage(`⚠️  Warning: Could not fetch git tags: ${error.message}`, 'warning');
+    logMessage(`⚠️ Warning: Could not fetch git tags: ${error.message}`, 'warning');
   }
 }
 
@@ -1230,7 +1230,7 @@ export async function run() {
     // This action only works on pull request events
     if (github.context.eventName !== 'pull_request') {
       logMessage(
-        `⏭️  This action is designed for pull_request events. Current event: ${github.context.eventName}. Skipping version check.`
+        `⏭️ This action is designed for pull_request events. Current event: ${github.context.eventName}. Skipping version check.`
       );
       return;
     }
@@ -1256,23 +1256,23 @@ export async function run() {
         logMessage(`📋 Found ${result.totalCommits} commits in PR`);
         // If no commits were found (API error fallback), use regular getChangedFiles
         if (result.totalCommits === 0) {
-          logMessage('ℹ️  Could not analyze individual commits, using standard file diff');
+          logMessage('ℹ️ Could not analyze individual commits, using standard file diff');
           changedFiles = await getChangedFiles();
         } else {
           changedFiles = result.files;
           if (result.skippedCommits > 0) {
             logMessage(
-              `⏭️  Skipped ${result.skippedCommits} of ${result.totalCommits} commits containing "${skipVersionKeyword}"`,
+              `⏭️ Skipped ${result.skippedCommits} of ${result.totalCommits} commits containing "${skipVersionKeyword}"`,
               'notice'
             );
           } else {
-            logMessage(`ℹ️  No commits contained skip keyword, all ${result.totalCommits} commits included`);
+            logMessage(`ℹ️ No commits contained skip keyword, all ${result.totalCommits} commits included`);
           }
         }
       } else {
         if (skipVersionKeyword && !token) {
           logMessage(
-            '⚠️  skip-version-keyword requires a token input for API access, using standard file diff',
+            '⚠️ skip-version-keyword requires a token input for API access, using standard file diff',
             'warning'
           );
         }
@@ -1306,10 +1306,10 @@ export async function run() {
 
       if (!hasRegularChanges && !hasPackageDepChanges && !hasRuntimeChange) {
         if (onlyDevDependencies) {
-          logMessage('⏭️  Only devDependency changes detected, skipping version check', 'notice');
+          logMessage('⏭️ Only devDependency changes detected, skipping version check', 'notice');
         } else {
           logMessage(
-            '⏭️  No JavaScript/TypeScript files or dependency changes detected, skipping version check',
+            '⏭️ No JavaScript/TypeScript files or dependency changes detected, skipping version check',
             'notice'
           );
         }
@@ -1325,7 +1325,7 @@ export async function run() {
         logMessage(`Changed files: ${relevantFiles.join(', ')}`);
       }
       if (hasRuntimeChange && !hasRegularChanges && !hasPackageDepChanges) {
-        logMessage('✅ action.yml Node.js runtime change detected, proceeding with version check...');
+        logMessage('✅ action.yml Node.js Actions runtime change detected, proceeding with version check...');
       }
     }
 
@@ -1342,7 +1342,7 @@ export async function run() {
         logMessage(`✅ Version consistency check passed (${consistencyResult.packageVersion})`);
       }
     } else {
-      logMessage('⏭️  Skipping version consistency check (skip-version-consistency-check: true)');
+      logMessage('⏭️ Skipping version consistency check (skip-version-consistency-check: true)');
     }
 
     // Read package.json
@@ -1353,7 +1353,7 @@ export async function run() {
     core.setOutput('current-version', currentVersion);
 
     // Get latest tag
-    logMessage('🏷️  Fetching git tags...');
+    logMessage('🏷️ Fetching git tags...');
     const latestTag = await getLatestVersionTag(tagPrefix);
 
     if (!latestTag) {
@@ -1369,7 +1369,7 @@ export async function run() {
     core.setOutput('previous-version', latestVersion);
 
     // Compare versions
-    logMessage('⚖️  Comparing versions...');
+    logMessage('⚖️ Comparing versions...');
     const comparison = compareVersions(currentVersion, latestVersion);
 
     switch (comparison) {
@@ -1410,23 +1410,23 @@ export async function run() {
 
         if (runtimeChange.changed) {
           logMessage(
-            `⚠️  Node.js runtime changed: node${runtimeChange.baseVersion} -> node${runtimeChange.headVersion}`
+            `⚠️ Node.js Actions runtime changed: node${runtimeChange.baseVersion} -> node${runtimeChange.headVersion}`
           );
           core.setOutput('runtime-changed', 'true');
 
           if (!isMajorVersionBump(currentVersion, latestVersion)) {
             core.setFailed(
-              `❌ ERROR: action.yml Node.js runtime changed from node${runtimeChange.baseVersion} to node${runtimeChange.headVersion}. This requires a MAJOR version bump (current: ${currentVersion}, previous: ${latestVersion}).`
+              `❌ ERROR: action.yml Node.js Actions runtime changed from node${runtimeChange.baseVersion} to node${runtimeChange.headVersion}. This requires a MAJOR version bump (current: ${currentVersion}, previous: ${latestVersion}).`
             );
             logMessage(
-              `💡 HINT: Node.js runtime changes are breaking changes for action consumers. Run 'npm version major' to increment the major version.`,
+              `💡 HINT: Node.js Actions runtime changes are breaking changes for action consumers. Run 'npm version major' to increment the major version.`,
               'notice'
             );
             return;
           }
 
           logMessage(
-            `✅ Major version bump detected for Node.js runtime change (node${runtimeChange.baseVersion} -> node${runtimeChange.headVersion})`
+            `✅ Major version bump detected for Node.js Actions runtime change (node${runtimeChange.baseVersion} -> node${runtimeChange.headVersion})`
           );
         }
       }
