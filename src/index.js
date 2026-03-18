@@ -41,6 +41,10 @@ const PACKAGE_JSON_FILENAME = 'package.json';
 const PACKAGE_LOCK_JSON_FILENAME = 'package-lock.json';
 const PACKAGE_FILENAMES = [PACKAGE_JSON_FILENAME, PACKAGE_LOCK_JSON_FILENAME];
 
+// Node runtime detection constants
+const NODE_RUNTIME_PATTERN = /runs:\s*\n\s+using:\s*['"]?(node(\d+))['"]?/;
+const DEFAULT_ACTION_YML_PATH = 'action.yml';
+
 /**
  * Log a message using GitHub Actions core logging
  */
@@ -926,6 +930,76 @@ export async function hasPackageDependencyChanges(changedFiles = null) {
 }
 
 /**
+ * Parse the Node.js runtime version from action.yml content.
+ * Extracts the version number from the runs.using field (e.g., 'node20' -> 20).
+ * @param {string} content - The raw content of an action.yml file
+ * @returns {number|null} The Node.js runtime version number, or null if not found or not a node runtime
+ */
+export function parseNodeRuntime(content) {
+  if (!content || typeof content !== 'string') return null;
+  const match = content.match(NODE_RUNTIME_PATTERN);
+  if (!match) return null;
+  const version = parseInt(match[2], 10);
+  return isNaN(version) ? null : version;
+}
+
+/**
+ * Detect if the Node.js runtime version changed in action.yml between base and head refs.
+ * @param {string} baseRef - The base git ref (SHA)
+ * @param {string} headRef - The head git ref (SHA)
+ * @param {string} actionYmlPath - Path to the action.yml file
+ * @returns {Promise<{changed: boolean, baseVersion: number|null, headVersion: number|null}>}
+ */
+export async function detectNodeRuntimeChange(baseRef, headRef, actionYmlPath) {
+  const result = { changed: false, baseVersion: null, headVersion: null };
+
+  try {
+    const sanitizedBaseRef = sanitizeSHA(baseRef, 'baseRef');
+    const sanitizedHeadRef = sanitizeSHA(headRef, 'headRef');
+
+    const baseContent = await getFileAtRef(actionYmlPath, sanitizedBaseRef);
+    const headContent = await getFileAtRef(actionYmlPath, sanitizedHeadRef);
+
+    if (!baseContent || !headContent) {
+      // action.yml doesn't exist at one or both refs - skip check
+      return result;
+    }
+
+    result.baseVersion = parseNodeRuntime(baseContent);
+    result.headVersion = parseNodeRuntime(headContent);
+
+    if (result.baseVersion !== null && result.headVersion !== null && result.baseVersion !== result.headVersion) {
+      result.changed = true;
+    }
+
+    return result;
+  } catch (error) {
+    logMessage(`Warning: Could not check action.yml runtime change: ${error.message}`, 'warning');
+    return result;
+  }
+}
+
+/**
+ * Check if the version bump is a major version bump.
+ * @param {string} currentVersion - The current version string (e.g., '2.0.0')
+ * @param {string} previousVersion - The previous version string (e.g., '1.2.3')
+ * @returns {boolean} True if the major version increased
+ */
+export function isMajorVersionBump(currentVersion, previousVersion) {
+  if (
+    !currentVersion ||
+    !previousVersion ||
+    typeof currentVersion !== 'string' ||
+    typeof previousVersion !== 'string'
+  ) {
+    return false;
+  }
+  const currentMajor = parseInt(currentVersion.split('.')[0], 10);
+  const previousMajor = parseInt(previousVersion.split('.')[0], 10);
+  return !isNaN(currentMajor) && !isNaN(previousMajor) && currentMajor > previousMajor;
+}
+
+/**
  * Check if any JavaScript/TypeScript or package files were changed (excluding test files)
  */
 export function hasRelevantFileChanges(changedFiles) {
@@ -1114,6 +1188,7 @@ export async function run() {
     const tagPrefix = core.getInput('tag-prefix') || 'v';
     const skipFilesCheck = core.getInput('skip-files-check') === 'true';
     const skipVersionConsistencyCheck = core.getInput('skip-version-consistency-check') === 'true';
+    const skipMajorOnActionsRuntimeChange = core.getInput('skip-major-on-actions-runtime-change') === 'true';
     // Handle skip-version-keyword: empty string explicitly disables, undefined/not-set uses default
     const skipKeywordInput = core.getInput('skip-version-keyword');
     const skipVersionKeyword = skipKeywordInput === '' ? '' : skipKeywordInput || DEFAULT_SKIP_KEYWORD;
@@ -1123,6 +1198,7 @@ export async function run() {
     logMessage(`Tag prefix: ${tagPrefix}`);
     logMessage(`Skip files check: ${skipFilesCheck}`);
     logMessage(`Skip version consistency check: ${skipVersionConsistencyCheck}`);
+    logMessage(`Skip major on actions runtime change: ${skipMajorOnActionsRuntimeChange}`);
     if (skipVersionKeyword) {
       logMessage(`Skip version keyword: ${skipVersionKeyword}`);
     }
@@ -1142,6 +1218,7 @@ export async function run() {
     core.setOutput('version-changed', 'false');
     core.setOutput('current-version', '');
     core.setOutput('previous-version', '');
+    core.setOutput('runtime-changed', 'false');
 
     // Check if we should run based on file changes
     if (!skipFilesCheck) {
@@ -1278,6 +1355,38 @@ export async function run() {
         logMessage('🎯 Semantic versioning check passed!');
         core.setOutput('version-changed', 'true');
         break;
+    }
+
+    // Check if action.yml node runtime changed and require major version bump
+    if (!skipMajorOnActionsRuntimeChange) {
+      const baseRef = github.context.payload.pull_request?.base?.sha;
+      const headRef = github.context.sha;
+
+      if (baseRef && headRef) {
+        const runtimeChange = await detectNodeRuntimeChange(baseRef, headRef, DEFAULT_ACTION_YML_PATH);
+
+        if (runtimeChange.changed) {
+          logMessage(
+            `⚠️  Node.js runtime changed: node${runtimeChange.baseVersion} -> node${runtimeChange.headVersion}`
+          );
+          core.setOutput('runtime-changed', 'true');
+
+          if (!isMajorVersionBump(currentVersion, latestVersion)) {
+            core.setFailed(
+              `❌ ERROR: action.yml Node.js runtime changed from node${runtimeChange.baseVersion} to node${runtimeChange.headVersion}. This requires a MAJOR version bump (current: ${currentVersion}, previous: ${latestVersion}).`
+            );
+            logMessage(
+              `💡 HINT: Node.js runtime changes are breaking changes for action consumers. Run 'npm version major' to increment the major version.`,
+              'notice'
+            );
+            return;
+          }
+
+          logMessage(
+            `✅ Major version bump detected for Node.js runtime change (node${runtimeChange.baseVersion} -> node${runtimeChange.headVersion})`
+          );
+        }
+      }
     }
 
     logMessage('🏁 Version check completed successfully');
