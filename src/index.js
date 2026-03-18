@@ -42,7 +42,9 @@ const PACKAGE_LOCK_JSON_FILENAME = 'package-lock.json';
 const PACKAGE_FILENAMES = [PACKAGE_JSON_FILENAME, PACKAGE_LOCK_JSON_FILENAME];
 
 // Node runtime detection constants
-const NODE_RUNTIME_PATTERN = /runs:[^\S\n]*\n[^\S\n]+using:[^\S\n]*['"]?(node(\d+))['"]?/;
+// Matches 'using: nodeNN' within a runs: block, handling \r\n and flexible key ordering
+const NODE_RUNTIME_USING_PATTERN = /using:[^\S\r\n]*['"]?(node(\d+))['"]?/;
+const RUNS_BLOCK_PATTERN = /^runs[^\S\r\n]*:/m;
 const DEFAULT_ACTION_YML_PATH = 'action.yml';
 
 /**
@@ -931,16 +933,36 @@ export async function hasPackageDependencyChanges(changedFiles = null) {
 
 /**
  * Parse the Node.js runtime version from action.yml content.
- * Extracts the version number from the runs.using field (e.g., 'node20' -> 20).
+ * Finds the runs: block and extracts the version from the using: field.
+ * Handles flexible key ordering, comments, and \\r\\n line endings.
  * @param {string} content - The raw content of an action.yml file
  * @returns {number|null} The Node.js runtime version number, or null if not found or not a node runtime
  */
 export function parseNodeRuntime(content) {
   if (!content || typeof content !== 'string') return null;
-  const match = content.match(NODE_RUNTIME_PATTERN);
-  if (!match) return null;
-  const version = parseInt(match[2], 10);
-  return isNaN(version) ? null : version;
+
+  // Find where the runs: block starts
+  const runsMatch = content.match(RUNS_BLOCK_PATTERN);
+  if (!runsMatch) return null;
+
+  // Extract the runs: block (from runs: to the next top-level key or end of file)
+  const runsStart = runsMatch.index + runsMatch[0].length;
+  const runsContent = content.substring(runsStart);
+
+  // Find using: within the runs block, stopping at the next top-level key (non-indented line with a colon)
+  const lines = runsContent.split(/\r?\n/);
+  for (const line of lines) {
+    // Stop at the next top-level key (non-empty, non-comment, no leading whitespace, has a colon)
+    if (/^[a-zA-Z]/.test(line) && line.includes(':')) break;
+
+    const usingMatch = line.match(NODE_RUNTIME_USING_PATTERN);
+    if (usingMatch) {
+      const version = parseInt(usingMatch[2], 10);
+      return isNaN(version) ? null : version;
+    }
+  }
+
+  return null;
 }
 
 /**
