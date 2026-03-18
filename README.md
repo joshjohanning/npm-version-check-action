@@ -110,24 +110,24 @@ jobs:
 
 ## 📥 Inputs
 
-| Input                                  | Description                                                                                      | Required | Default               |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------ | -------- | --------------------- |
-| `package-path`                         | Path to package.json file (relative to repository root)                                          | No       | `package.json`        |
-| `tag-prefix`                           | Prefix for version tags (e.g., "v" for v1.0.0)                                                   | No       | `v`                   |
-| `skip-files-check`                     | Skip checking if JS/package files changed (always run version check)                             | No       | `false`               |
-| `include-dev-dependencies`             | Whether devDependency changes should trigger version bump requirement                            | No       | `false`               |
-| `skip-version-keyword`                 | Keyword in commit messages to skip version check for that commit's files. Set to `''` to disable | No       | `[skip version]`      |
-| `skip-version-consistency-check`       | Skip the check that validates package.json and package-lock.json have matching versions          | No       | `false`               |
-| `skip-major-on-actions-runtime-change` | Skip the check that requires a major version bump when `action.yml` changes its Node.js Actions runtime  | No       | `false`               |
-| `token`                                | GitHub token for API access (required for `skip-version-keyword` to analyze commits)             | No       | `${{ github.token }}` |
+| Input                                  | Description                                                                                             | Required | Default               |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------- | -------- | --------------------- |
+| `package-path`                         | Path to package.json file (relative to repository root)                                                 | No       | `package.json`        |
+| `tag-prefix`                           | Prefix for version tags (e.g., "v" for v1.0.0)                                                          | No       | `v`                   |
+| `skip-files-check`                     | Skip checking if JS/package files changed (always run version check)                                    | No       | `false`               |
+| `include-dev-dependencies`             | Whether devDependency changes should trigger version bump requirement                                   | No       | `false`               |
+| `skip-version-keyword`                 | Keyword in commit messages to skip version check for that commit's files. Set to `''` to disable        | No       | `[skip version]`      |
+| `skip-version-consistency-check`       | Skip the check that validates package.json and package-lock.json have matching versions                 | No       | `false`               |
+| `skip-major-on-actions-runtime-change` | Skip the check that requires a major version bump when `action.yml` changes its Node.js Actions runtime | No       | `false`               |
+| `token`                                | GitHub token for API access (required for `skip-version-keyword` to analyze commits)                    | No       | `${{ github.token }}` |
 
 ## 📤 Outputs
 
-| Output             | Description                                                                |
-| ------------------ | -------------------------------------------------------------------------- |
-| `version-changed`  | Whether the version was changed (`true`/`false`)                           |
-| `current-version`  | Current version from package.json                                          |
-| `previous-version` | Previous version from latest git tag                                       |
+| Output             | Description                                                                        |
+| ------------------ | ---------------------------------------------------------------------------------- |
+| `version-changed`  | Whether the version was changed (`true`/`false`)                                   |
+| `current-version`  | Current version from package.json                                                  |
+| `previous-version` | Previous version from latest git tag                                               |
 | `runtime-changed`  | Whether the Node.js Actions runtime version in action.yml changed (`true`/`false`) |
 
 ### Using Outputs
