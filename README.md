@@ -51,7 +51,7 @@ jobs:
   version-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - uses: joshjohanning/npm-version-check-action@v2
 ```
@@ -86,7 +86,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Check version increment
         uses: joshjohanning/npm-version-check-action@v2
@@ -95,7 +95,7 @@ jobs:
           tag-prefix: 'v'
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
           node-version: '24'
           cache: 'npm'
