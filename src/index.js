@@ -825,13 +825,21 @@ export async function hasPackageDependencyChanges(changedFiles = null) {
                   const baseTransitives = getTransitiveDeps(basePkgs, startKeys);
                   const devTransitives = new Set([...headTransitives, ...baseTransitives]);
 
-                  // Build a set of package names reachable from dev deps for
-                  // fallback reshuffling detection (npm may nest the same package
-                  // at a different path than the tree walk finds).
-                  const devTransitiveNames = new Set();
-                  for (const tKey of devTransitives) {
-                    const name = extractPackageName(tKey);
-                    if (name) devTransitiveNames.add(name);
+                  // Build a set of package names that have a *confirmed* dev-attributable
+                  // changed entry (either reachable via tree walk or marked dev: true).
+                  // Used for fallback reshuffling detection: npm may nest the same package
+                  // at a different path than the tree walk finds, but we only allow the
+                  // name-based fallback if there's corroborating evidence that the dev
+                  // update actually affected this package name.
+                  const confirmedDevChangedNames = new Set();
+                  for (const cKey of changedKeys) {
+                    const cHeadPkg = headPkgs[cKey];
+                    const cBasePkg = basePkgs[cKey];
+                    const isDev = (cHeadPkg && cHeadPkg.dev) || (!cHeadPkg && cBasePkg && cBasePkg.dev);
+                    if (isDev || devTransitives.has(cKey)) {
+                      const name = extractPackageName(cKey);
+                      if (name) confirmedDevChangedNames.add(name);
+                    }
                   }
 
                   let hasNonAttributableChange = false;
@@ -843,13 +851,15 @@ export async function hasPackageDependencyChanges(changedFiles = null) {
 
                     if (!devTransitives.has(key)) {
                       // Fallback: check if the package name (regardless of nesting path)
-                      // appears as a transitive of changed dev deps. This handles npm
-                      // reshuffling where a package is moved to a different node_modules
-                      // nesting level as a side-effect of a devDependency update.
+                      // also changed at another path that IS confirmed as a dev change.
+                      // This handles npm reshuffling where a package is moved to a different
+                      // node_modules nesting level, but only when there's corroborating
+                      // evidence (another changed instance of the same package that is
+                      // reachable from dev deps or marked dev: true).
                       const pkgName = extractPackageName(key);
-                      if (pkgName && devTransitiveNames.has(pkgName)) {
+                      if (pkgName && confirmedDevChangedNames.has(pkgName)) {
                         logMessage(
-                          `Debug: lockfile change at ${key} attributed to devDependency reshuffling (package name ${pkgName} found in dev transitives)`,
+                          `Debug: lockfile change at ${key} attributed to devDependency reshuffling (package name ${pkgName} also changed at a confirmed dev path)`,
                           'debug'
                         );
                         continue;

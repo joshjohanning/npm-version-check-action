@@ -1810,9 +1810,9 @@ describe('hasPackageDependencyChanges', () => {
     const result = await hasPackageDependencyChanges();
 
     // node_modules/cliui/node_modules/ansi-regex changed and has no dev: true,
-    // but the package name "ansi-regex" appears in devTransitives (at other paths
-    // like node_modules/ansi-regex or jest-cli/node_modules/ansi-regex), so the
-    // name-based fallback correctly identifies this as reshuffling.
+    // but the package name "ansi-regex" also changed at a confirmed dev path
+    // (node_modules/ansi-regex has dev: true and changed version), so the
+    // tightened name-based fallback correctly identifies this as reshuffling.
     expect(result).toEqual({ hasChanges: false, onlyDevDependencies: true });
   });
 
