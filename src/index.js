@@ -320,12 +320,18 @@ export async function getCommitsWithMessages() {
     const records = output.split('\x1e').filter(r => r.trim());
     logMessage(`📋 Found ${records.length} commits in PR`, 'debug');
 
-    const commits = records.map(record => {
-      const sepIndex = record.indexOf('\x1f');
-      const sha = record.substring(0, sepIndex).trim();
-      const message = record.substring(sepIndex + 1).trim();
-      return { sha: sanitizeSHA(sha, 'commitSha'), message };
-    });
+    const commits = records
+      .map(record => {
+        const sepIndex = record.indexOf('\x1f');
+        if (sepIndex === -1) {
+          logMessage(`⚠️ Skipping malformed commit record (no separator found)`, 'warning');
+          return null;
+        }
+        const sha = record.substring(0, sepIndex).trim();
+        const message = record.substring(sepIndex + 1).trim();
+        return { sha: sanitizeSHA(sha, 'commitSha'), message };
+      })
+      .filter(Boolean);
 
     return commits;
   } catch (error) {
