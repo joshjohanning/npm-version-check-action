@@ -23,7 +23,7 @@ Please refer to the [release page](https://github.com/joshjohanning/npm-version-
 - ⏭️ **Per-commit skip support** - Use `[skip version]` in commit messages to exclude specific commits from version checking
 - 📊 **Semantic versioning validation** - Ensures new version is higher than previous release
 - 🏷️ **Git tag comparison** - Compares against the latest git tag
-- 🚀 **Shallow clone compatible** - Automatically fetches tags, works with default checkout
+- 🚀 **Shallow clone compatible** - Uses GitHub API for tag comparison, works with default checkout and `persist-credentials: false`
 - 🎉 **First release support** - Gracefully handles repositories with no previous tags
 - 🚀 **JavaScript action** - Fast execution with Node.js runtime
 - 🔄 **Node.js Actions runtime change detection** - Requires a major version bump when `action.yml` changes its Node.js Actions runtime (e.g., `node20` to `node24`)

@@ -36,7 +36,8 @@ const mockOctokit = {
       listCommits: jest.fn()
     },
     repos: {
-      getCommit: jest.fn()
+      getCommit: jest.fn(),
+      listTags: jest.fn()
     }
   },
   paginate: jest.fn()
@@ -87,12 +88,8 @@ function createExecMock(basePackageJson, headPackageJson, basePackageLock, headP
   return async (command, args, options) => {
     let output = '';
 
-    // Handle fetchTags calls
-    if (args.includes('fetch') && args.includes('--tags')) {
-      output = '';
-    }
     // Handle getChangedFiles calls
-    else if (args.includes('diff') && args.includes('--name-only')) {
+    if (args.includes('diff') && args.includes('--name-only')) {
       output = '';
     }
     // Handle package.json file retrieval
@@ -1058,12 +1055,8 @@ describe('hasPackageDependencyChanges', () => {
     mockExec.exec.mockImplementation(async (command, args, options) => {
       let output = '';
 
-      // Handle fetchTags calls
-      if (args.includes('fetch') && args.includes('--tags')) {
-        output = '';
-      }
       // Handle getChangedFiles calls
-      else if (args.includes('diff') && args.includes('--name-only')) {
+      if (args.includes('diff') && args.includes('--name-only')) {
         output = '';
       }
       // Handle package.json file retrieval
@@ -2770,7 +2763,7 @@ describe('npm Version Check Action - Integration Tests', () => {
       const { execGit } = indexModule;
 
       await expect(execGit(['diff', '--dangerous-option'])).rejects.toThrow('Potentially dangerous git option');
-      await expect(execGit(['fetch', '--upload-pack'])).rejects.toThrow('Dangerous git option detected');
+      await expect(execGit(['fetch', '--upload-pack'])).rejects.toThrow('Unsupported git command');
     });
 
     test('should allow valid SHA hashes', async () => {
@@ -2803,8 +2796,6 @@ describe('npm Version Check Action - Integration Tests', () => {
       mockExec.exec.mockResolvedValue(0);
 
       await expect(execGit(['diff', '--name-only', TEST_HEAD_SHA, TEST_BASE_SHA])).resolves.not.toThrow();
-      await expect(execGit(['fetch', '--tags'])).resolves.not.toThrow();
-      await expect(execGit(['tag', '-l'])).resolves.not.toThrow();
     });
 
     test('should allow double dash separator for file paths', async () => {
@@ -2865,20 +2856,13 @@ describe('npm Version Check Action - Integration Tests', () => {
     test('should return latest version tag', async () => {
       const { getLatestVersionTag } = indexModule;
 
-      let callCount = 0;
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        callCount++;
-        if (callCount === 1) {
-          // First call: git fetch --tags
-          return 0;
-        } else if (callCount === 2) {
-          // Second call: git tag -l
-          if (options.listeners && options.listeners.stdout) {
-            options.listeners.stdout('v1.0.0\nv1.1.0\nv1.0.1\nother-tag\n');
-          }
-          return 0;
-        }
-      });
+      // Mock octokit.paginate to return tags from the API
+      mockOctokit.paginate.mockResolvedValue([
+        { name: 'v1.0.0' },
+        { name: 'v1.1.0' },
+        { name: 'v1.0.1' },
+        { name: 'other-tag' }
+      ]);
 
       // Mock semver.compare to simulate proper version comparison for sorting
       mockSemver.compare.mockImplementation((a, b) => {
@@ -2891,41 +2875,33 @@ describe('npm Version Check Action - Integration Tests', () => {
         return versions[a] - versions[b];
       });
 
-      const result = await getLatestVersionTag('v');
+      const result = await getLatestVersionTag('v', 'fake-token');
       expect(result).toBe('v1.1.0');
+      expect(mockGithub.getOctokit).toHaveBeenCalledWith('fake-token');
+      expect(mockOctokit.paginate).toHaveBeenCalledWith(mockOctokit.rest.repos.listTags, {
+        owner: 'test-owner',
+        repo: 'test-repo',
+        per_page: 100
+      });
     });
 
     test('should return null when no version tags exist', async () => {
       const { getLatestVersionTag } = indexModule;
 
-      let callCount = 0;
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        callCount++;
-        if (callCount === 1) {
-          return 0; // git fetch --tags
-        } else if (callCount === 2) {
-          if (options.listeners && options.listeners.stdout) {
-            options.listeners.stdout('other-tag\nnothing-relevant\n');
-          }
-          return 0;
-        }
-      });
+      mockOctokit.paginate.mockResolvedValue([{ name: 'other-tag' }, { name: 'nothing-relevant' }]);
 
-      const result = await getLatestVersionTag('v');
+      const result = await getLatestVersionTag('v', 'fake-token');
       expect(result).toBeNull();
     });
 
-    test('should handle git fetch failure gracefully', async () => {
+    test('should handle API failure gracefully', async () => {
       const { getLatestVersionTag } = indexModule;
 
-      mockExec.exec.mockImplementation(async (command, args) => {
-        if (args.includes('fetch')) {
-          throw new Error('Network error');
-        }
-        return 0;
-      });
+      mockOctokit.paginate.mockRejectedValue(new Error('API error'));
 
-      await expect(getLatestVersionTag('v')).rejects.toThrow('Failed to fetch git tags: Network error');
+      await expect(getLatestVersionTag('v', 'fake-token')).rejects.toThrow(
+        'Failed to fetch repository tags: API error'
+      );
     });
   });
 
@@ -2983,31 +2959,6 @@ describe('npm Version Check Action - Integration Tests', () => {
       const changedFiles = ['README.md', '__tests__/unit.test.js', 'docs/api.md', 'jest.config.js'];
 
       expect(hasRelevantFileChanges(changedFiles)).toBe(false);
-    });
-  });
-
-  describe('fetchTags function', () => {
-    test('should handle fetchTags success', async () => {
-      const { fetchTags } = indexModule;
-
-      mockExec.exec.mockResolvedValue(0);
-
-      await fetchTags();
-
-      expect(mockExec.exec).toHaveBeenCalledWith('git', ['fetch', '--tags'], expect.any(Object));
-      expect(mockCore.warning).not.toHaveBeenCalled();
-    });
-
-    test('should handle fetchTags error gracefully', async () => {
-      const { fetchTags } = indexModule;
-
-      mockExec.exec.mockRejectedValue(new Error('Network error'));
-
-      await fetchTags();
-
-      expect(mockCore.warning).toHaveBeenCalledWith(
-        'Could not fetch git tags: Network error. Some version comparisons may be limited.'
-      );
     });
   });
 
@@ -3569,21 +3520,19 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.0.0' }));
 
-      // Mock API responses for commits
-      mockOctokit.paginate.mockResolvedValue([
-        { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add new feature' } }
-      ]);
+      // Mock API responses for commits and tags
+      mockOctokit.paginate.mockImplementation(async method => {
+        if (method === mockOctokit.rest.repos.listTags) {
+          return [{ name: 'v1.0.0' }];
+        }
+        return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add new feature' } }];
+      });
 
       mockOctokit.rest.repos.getCommit.mockResolvedValue({
         data: { files: [{ filename: 'src/index.js' }] }
       });
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('tag')) {
-          options.listeners.stdout('v1.0.0');
-        }
-        return 0;
-      });
+      mockExec.exec.mockResolvedValue(0);
 
       mockSemver.compare.mockReturnValue(0); // Same version
 
@@ -3602,21 +3551,19 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '0.9.0' }));
 
-      // Mock API responses for commits
-      mockOctokit.paginate.mockResolvedValue([
-        { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add new feature' } }
-      ]);
+      // Mock API responses for commits and tags
+      mockOctokit.paginate.mockImplementation(async method => {
+        if (method === mockOctokit.rest.repos.listTags) {
+          return [{ name: 'v1.0.0' }];
+        }
+        return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add new feature' } }];
+      });
 
       mockOctokit.rest.repos.getCommit.mockResolvedValue({
         data: { files: [{ filename: 'src/index.js' }] }
       });
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('tag')) {
-          options.listeners.stdout('v1.0.0');
-        }
-        return 0;
-      });
+      mockExec.exec.mockResolvedValue(0);
 
       mockSemver.compare.mockReturnValue(-1); // Lower version
 
@@ -3635,21 +3582,19 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.1.0' }));
 
-      // Mock API responses for commits
-      mockOctokit.paginate.mockResolvedValue([
-        { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add new feature' } }
-      ]);
+      // Mock API responses for commits and tags
+      mockOctokit.paginate.mockImplementation(async method => {
+        if (method === mockOctokit.rest.repos.listTags) {
+          return [{ name: 'v1.0.0' }];
+        }
+        return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add new feature' } }];
+      });
 
       mockOctokit.rest.repos.getCommit.mockResolvedValue({
         data: { files: [{ filename: 'src/index.js' }] }
       });
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('tag')) {
-          options.listeners.stdout('v1.0.0');
-        }
-        return 0;
-      });
+      mockExec.exec.mockResolvedValue(0);
 
       mockSemver.compare.mockReturnValue(1); // Higher version
 
@@ -3666,10 +3611,13 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.1.0' }));
 
-      // Mock API responses for commits
-      mockOctokit.paginate.mockResolvedValue([
-        { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Upgrade runtime' } }
-      ]);
+      // Mock API responses for commits and tags
+      mockOctokit.paginate.mockImplementation(async method => {
+        if (method === mockOctokit.rest.repos.listTags) {
+          return [{ name: 'v1.0.0' }];
+        }
+        return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Upgrade runtime' } }];
+      });
 
       mockOctokit.rest.repos.getCommit.mockResolvedValue({
         data: { files: [{ filename: 'src/index.js' }] }
@@ -3679,9 +3627,7 @@ describe('npm Version Check Action - Integration Tests', () => {
       const headActionYml = `name: 'my-action'\nruns:\n  using: 'node24'\n  main: 'dist/index.js'\n`;
 
       mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('tag')) {
-          options.listeners.stdout('v1.0.0');
-        } else if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:action.yml`) {
+        if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:action.yml`) {
           options.listeners.stdout(Buffer.from(baseActionYml));
         } else if (args.includes('show') && args[1] === `${TEST_HEAD_SHA}:action.yml`) {
           options.listeners.stdout(Buffer.from(headActionYml));
@@ -3707,10 +3653,13 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '2.0.0' }));
 
-      // Mock API responses for commits
-      mockOctokit.paginate.mockResolvedValue([
-        { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Upgrade runtime' } }
-      ]);
+      // Mock API responses for commits and tags
+      mockOctokit.paginate.mockImplementation(async method => {
+        if (method === mockOctokit.rest.repos.listTags) {
+          return [{ name: 'v1.0.0' }];
+        }
+        return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Upgrade runtime' } }];
+      });
 
       mockOctokit.rest.repos.getCommit.mockResolvedValue({
         data: { files: [{ filename: 'src/index.js' }] }
@@ -3720,9 +3669,7 @@ describe('npm Version Check Action - Integration Tests', () => {
       const headActionYml = `name: 'my-action'\nruns:\n  using: 'node24'\n  main: 'dist/index.js'\n`;
 
       mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('tag')) {
-          options.listeners.stdout('v1.0.0');
-        } else if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:action.yml`) {
+        if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:action.yml`) {
           options.listeners.stdout(Buffer.from(baseActionYml));
         } else if (args.includes('show') && args[1] === `${TEST_HEAD_SHA}:action.yml`) {
           options.listeners.stdout(Buffer.from(headActionYml));
@@ -3767,12 +3714,10 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.1.0' }));
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('tag')) {
-          options.listeners.stdout('v1.0.0');
-        }
-        return 0;
-      });
+      // Mock API response for tags (skip-files-check: true, so no commit fetching)
+      mockOctokit.paginate.mockResolvedValue([{ name: 'v1.0.0' }]);
+
+      mockExec.exec.mockResolvedValue(0);
 
       mockSemver.compare.mockReturnValue(1); // Higher version
 
@@ -3788,19 +3733,20 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.1.0' }));
 
-      // Mock API responses for commits
-      mockOctokit.paginate.mockResolvedValue([
-        { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add feature' } }
-      ]);
+      // Mock API responses for commits and tags
+      mockOctokit.paginate.mockImplementation(async method => {
+        if (method === mockOctokit.rest.repos.listTags) {
+          return [{ name: 'v1.0.0' }];
+        }
+        return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add feature' } }];
+      });
 
       mockOctokit.rest.repos.getCommit.mockResolvedValue({
         data: { files: [{ filename: 'src/index.js' }] }
       });
 
       mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('tag')) {
-          options.listeners.stdout('v1.0.0');
-        } else if (args.includes('show') && args[1]?.includes('action.yml')) {
+        if (args.includes('show') && args[1]?.includes('action.yml')) {
           throw new Error('File not found');
         } else if (args.includes('show') && args[1]?.includes('package.json')) {
           options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
@@ -3823,9 +3769,12 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.1.0' }));
 
-      mockOctokit.paginate.mockResolvedValue([
-        { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add feature' } }
-      ]);
+      mockOctokit.paginate.mockImplementation(async method => {
+        if (method === mockOctokit.rest.repos.listTags) {
+          return [{ name: 'v1.0.0' }];
+        }
+        return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add feature' } }];
+      });
 
       mockOctokit.rest.repos.getCommit.mockResolvedValue({
         data: { files: [{ filename: 'src/index.js' }] }
@@ -3834,9 +3783,7 @@ describe('npm Version Check Action - Integration Tests', () => {
       const actionYml = `name: 'my-action'\nruns:\n  using: 'node20'\n  main: 'dist/index.js'\n`;
 
       mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('tag')) {
-          options.listeners.stdout('v1.0.0');
-        } else if (args.includes('show') && args[1]?.includes('action.yml')) {
+        if (args.includes('show') && args[1]?.includes('action.yml')) {
           options.listeners.stdout(Buffer.from(actionYml));
         } else if (args.includes('show') && args[1]?.includes('package.json')) {
           options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
@@ -3857,9 +3804,12 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.1.0' }));
 
-      mockOctokit.paginate.mockResolvedValue([
-        { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add feature' } }
-      ]);
+      mockOctokit.paginate.mockImplementation(async method => {
+        if (method === mockOctokit.rest.repos.listTags) {
+          return [{ name: 'v1.0.0' }];
+        }
+        return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add feature' } }];
+      });
 
       mockOctokit.rest.repos.getCommit.mockResolvedValue({
         data: { files: [{ filename: 'src/index.js' }] }
@@ -3867,9 +3817,7 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       // Make action.yml retrieval fail with an unexpected error on both refs
       mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('tag')) {
-          options.listeners.stdout('v1.0.0');
-        } else if (args.includes('show') && args[1]?.includes('action.yml')) {
+        if (args.includes('show') && args[1]?.includes('action.yml')) {
           throw new Error('Unexpected git error');
         } else if (args.includes('show') && args[1]?.includes('package.json')) {
           options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
@@ -3892,9 +3840,12 @@ describe('npm Version Check Action - Integration Tests', () => {
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.1.0' }));
 
       // Only action.yml changed - no JS/TS or package dependency changes
-      mockOctokit.paginate.mockResolvedValue([
-        { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Upgrade runtime' } }
-      ]);
+      mockOctokit.paginate.mockImplementation(async method => {
+        if (method === mockOctokit.rest.repos.listTags) {
+          return [{ name: 'v1.0.0' }];
+        }
+        return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Upgrade runtime' } }];
+      });
 
       mockOctokit.rest.repos.getCommit.mockResolvedValue({
         data: { files: [{ filename: 'action.yml' }] }
@@ -3904,9 +3855,7 @@ describe('npm Version Check Action - Integration Tests', () => {
       const headActionYml = `name: 'my-action'\nruns:\n  using: 'node24'\n  main: 'dist/index.js'\n`;
 
       mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('tag')) {
-          options.listeners.stdout('v1.0.0');
-        } else if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:action.yml`) {
+        if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:action.yml`) {
           options.listeners.stdout(Buffer.from(baseActionYml));
         } else if (args.includes('show') && args[1] === `${TEST_HEAD_SHA}:action.yml`) {
           options.listeners.stdout(Buffer.from(headActionYml));
@@ -4025,13 +3974,13 @@ describe('npm Version Check Action - Integration Tests', () => {
         }
       });
 
-      // Mock fetchTags to throw an error that propagates up
-      mockExec.exec.mockRejectedValue(new Error('Git command failed'));
+      // Mock the GitHub API (paginate) to throw an error
+      mockOctokit.paginate.mockRejectedValue(new Error('API request failed'));
 
       await run();
 
       expect(mockCore.setFailed).toHaveBeenCalledWith(
-        'Action failed with error: Failed to fetch git tags: Git command failed'
+        'Action failed with error: Failed to fetch repository tags: API request failed'
       );
     });
 
@@ -4060,20 +4009,23 @@ describe('npm Version Check Action - Integration Tests', () => {
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args.includes('diff') && args.includes('--name-only')) {
           options.listeners.stdout('src/index.js\n');
-        } else if (args.includes('tag')) {
-          options.listeners.stdout('v1.0.0');
         } else if (args.includes('show')) {
           options.listeners.stdout('{}');
         }
         return 0;
       });
 
+      // Mock API response for tags (getLatestVersionTag still uses paginate)
+      mockOctokit.paginate.mockResolvedValue([{ name: 'v1.0.0' }]);
+
       mockSemver.compare.mockReturnValue(1);
 
       await run();
 
-      // Should NOT call paginate when skip-version-keyword is empty
-      expect(mockOctokit.paginate).not.toHaveBeenCalled();
+      // Should NOT call paginate with listCommits when skip-version-keyword is empty
+      expect(mockOctokit.paginate).not.toHaveBeenCalledWith(mockOctokit.rest.pulls.listCommits, expect.any(Object));
+      // Should still call paginate for tags
+      expect(mockOctokit.paginate).toHaveBeenCalledWith(mockOctokit.rest.repos.listTags, expect.any(Object));
       // Should use standard file diff instead
       expect(mockCore.info).toHaveBeenCalledWith('📁 Checking files changed in PR...');
     });
@@ -4153,12 +4105,10 @@ describe('npm Version Check Action - Integration Tests', () => {
         return '{}';
       });
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('tag')) {
-          options.listeners.stdout('v1.0.0');
-        }
-        return 0;
-      });
+      mockExec.exec.mockResolvedValue(0);
+
+      // Mock API response for tags (skip-files-check: true, so no commit fetching)
+      mockOctokit.paginate.mockResolvedValue([{ name: 'v1.0.0' }]);
 
       mockSemver.compare.mockReturnValue(1); // Higher version
 
