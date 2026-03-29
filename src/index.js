@@ -6,8 +6,8 @@ import * as path from 'path';
 import semver from 'semver';
 
 // Shared constants for validation
-const SAFE_GIT_COMMANDS = ['diff', 'fetch', 'tag', 'show'];
-const SAFE_GIT_OPTIONS = ['-l', '--name-only', '--tags', '--'];
+const SAFE_GIT_COMMANDS = ['diff', 'diff-tree', 'fetch', 'log', 'rev-list', 'tag', 'show'];
+const SAFE_GIT_OPTIONS = ['-1', '-l', '-r', '--format=%B', '--name-only', '--no-commit-id', '--tags', '--'];
 
 // Default skip keyword for bypassing version check on specific commits
 const DEFAULT_SKIP_KEYWORD = '[skip version]';
@@ -111,6 +111,16 @@ export async function execGit(args) {
 
       // Allow SHA hashes (for baseRef/headRef) - inline validation for GHAS
       if (SHA_PATTERN.test(arg)) {
+        return arg;
+      }
+
+      // Allow SHA range specs (e.g., abc1234..def5678) for git rev-list/log
+      if (/^[a-f0-9]{7,40}\.\.[a-f0-9]{7,40}$/i.test(arg)) {
+        return arg;
+      }
+
+      // Allow safe numeric options like --depth=N and --deepen=N
+      if (/^--(?:depth|deepen)=\d+$/.test(arg)) {
         return arg;
       }
 
@@ -250,70 +260,81 @@ export async function getChangedFiles() {
 }
 
 /**
- * Get commits in the current PR with their messages
- * @param {string} token - GitHub token for API access
+ * Get commits in the current PR with their messages using git commands.
+ * Uses git rev-list and git log instead of the GitHub Pulls API, so only
+ * contents: read permission is needed (no pull-requests: read).
  * @returns {Promise<Array<{sha: string, message: string}>>} Array of commit objects with SHA and message
  */
-export async function getCommitsWithMessages(token) {
+export async function getCommitsWithMessages() {
   const context = github.context;
 
   if (context.eventName !== 'pull_request') {
     return [];
   }
 
-  const prNumber = context.payload.pull_request?.number;
-  if (!prNumber) {
-    logMessage('⚠️ Could not determine PR number', 'warning');
+  const baseRef = context.payload.pull_request?.base?.sha;
+  const headRef = context.sha;
+
+  if (!baseRef || !headRef) {
+    logMessage('⚠️ Could not determine base and head refs for PR', 'warning');
     return [];
   }
 
-  // Use GitHub API to get commits - works with shallow clones
-  if (!token) {
-    logMessage('⚠️ No token provided, cannot fetch PR commits via API', 'warning');
-    return [];
-  }
+  const sanitizedBaseRef = sanitizeSHA(baseRef, 'baseRef');
+  const sanitizedHeadRef = sanitizeSHA(headRef, 'headRef');
 
   try {
-    const octokit = github.getOctokit(token);
-    // Use pagination to handle PRs with more than 100 commits
-    const commits = await octokit.paginate(octokit.rest.pulls.listCommits, {
-      owner: context.repo.owner,
-      repo: context.repo.repo,
-      pull_number: prNumber,
-      per_page: 100
-    });
+    // Ensure sufficient git history for enumerating PR commits.
+    // With shallow clones (default actions/checkout fetch-depth: 1),
+    // intermediate commits between base and head may not be available.
+    const prCommitCount = context.payload.pull_request?.commits || 100;
+    try {
+      await execGit(['fetch', `--deepen=${prCommitCount + 10}`]);
+    } catch {
+      // May already have full history, which is fine
+    }
 
-    logMessage(`📋 Found ${commits.length} commits in PR`, 'debug');
+    // Get commit SHAs in the PR range (commits reachable from head but not from base)
+    const shaOutput = await execGit([
+      'rev-list',
+      `${sanitizedBaseRef}..${sanitizedHeadRef}`
+    ]);
 
-    return commits.map(commit => ({
-      sha: commit.sha,
-      message: commit.commit.message // Full commit message for keyword matching
-    }));
+    if (!shaOutput) {
+      return [];
+    }
+
+    const shas = shaOutput.split('\n').filter(Boolean);
+    logMessage(`📋 Found ${shas.length} commits in PR`, 'debug');
+
+    // Get full commit messages for each SHA
+    const commits = [];
+    for (const sha of shas) {
+      const sanitizedSha = sanitizeSHA(sha, 'commitSha');
+      const message = await execGit(['log', '-1', '--format=%B', sanitizedSha]);
+      commits.push({ sha: sanitizedSha, message });
+    }
+
+    return commits;
   } catch (error) {
-    logMessage(`⚠️ Could not fetch PR commits via API: ${error.message}`, 'warning');
+    logMessage(`⚠️ Could not fetch PR commits via git: ${error.message}`, 'warning');
     return [];
   }
 }
 
 /**
- * Get files changed in a specific commit using GitHub API
+ * Get files changed in a specific commit using git diff-tree.
+ * Uses local git commands instead of the GitHub API, so no API token is needed.
  * @param {string} sha - The commit SHA
- * @param {object} octokit - The authenticated Octokit instance
- * @param {string} owner - Repository owner
- * @param {string} repo - Repository name
  * @returns {Promise<string[]>} Array of file paths changed in the commit
  */
-export async function getFilesForCommit(sha, octokit, owner, repo) {
+export async function getFilesForCommit(sha) {
   try {
     const sanitizedSha = sanitizeSHA(sha, 'commitSha');
 
-    const { data: commit } = await octokit.rest.repos.getCommit({
-      owner,
-      repo,
-      ref: sanitizedSha
-    });
+    const output = await execGit(['diff-tree', '--no-commit-id', '--name-only', '-r', sanitizedSha]);
 
-    return commit.files ? commit.files.map(f => f.filename) : [];
+    return output ? output.split('\n').filter(Boolean) : [];
   } catch (error) {
     logMessage(`⚠️ Could not fetch files for commit ${sha.substring(0, 7)}: ${error.message}`, 'warning');
     return [];
@@ -321,18 +342,13 @@ export async function getFilesForCommit(sha, octokit, owner, repo) {
 }
 
 /**
- * Get files changed in the PR, excluding files from commits that contain the skip keyword
+ * Get files changed in the PR, excluding files from commits that contain the skip keyword.
+ * Uses git commands instead of the GitHub API, so no token or pull-requests permission is needed.
  * @param {string} skipKeyword - The keyword to look for in commit messages
- * @param {string} token - GitHub token for API access
  * @returns {Promise<{files: string[], skippedCommits: number, totalCommits: number}>}
  */
-export async function getChangedFilesWithSkipSupport(skipKeyword, token) {
-  const context = github.context;
-  const octokit = github.getOctokit(token);
-  const owner = context.repo.owner;
-  const repo = context.repo.repo;
-
-  const commits = await getCommitsWithMessages(token);
+export async function getChangedFilesWithSkipSupport(skipKeyword) {
+  const commits = await getCommitsWithMessages();
 
   if (commits.length === 0) {
     return { files: [], skippedCommits: 0, totalCommits: 0 };
@@ -356,7 +372,7 @@ export async function getChangedFilesWithSkipSupport(skipKeyword, token) {
 
   // Fetch files for all non-skipped commits in parallel
   const fileResults = await Promise.all(
-    nonSkippedCommits.map(commit => getFilesForCommit(commit.sha, octokit, owner, repo))
+    nonSkippedCommits.map(commit => getFilesForCommit(commit.sha))
   );
 
   // Collect all unique files
@@ -1216,7 +1232,6 @@ export async function run() {
     // Handle skip-version-keyword: empty string explicitly disables, undefined/not-set uses default
     const skipKeywordInput = core.getInput('skip-version-keyword');
     const skipVersionKeyword = skipKeywordInput === '' ? '' : skipKeywordInput || DEFAULT_SKIP_KEYWORD;
-    const token = core.getInput('token') || process.env.GITHUB_TOKEN;
 
     logMessage(`Package path: ${packagePath}`);
     logMessage(`Tag prefix: ${tagPrefix}`);
@@ -1250,11 +1265,11 @@ export async function run() {
 
       // Get changed files, respecting skip-version-keyword in commit messages
       let changedFiles;
-      if (skipVersionKeyword && token) {
+      if (skipVersionKeyword) {
         logMessage(`🔍 Analyzing commits for skip keyword: "${skipVersionKeyword}"`);
-        const result = await getChangedFilesWithSkipSupport(skipVersionKeyword, token);
+        const result = await getChangedFilesWithSkipSupport(skipVersionKeyword);
         logMessage(`📋 Found ${result.totalCommits} commits in PR`);
-        // If no commits were found (API error fallback), use regular getChangedFiles
+        // If no commits were found (git error fallback), use regular getChangedFiles
         if (result.totalCommits === 0) {
           logMessage('ℹ️ Could not analyze individual commits, using standard file diff');
           changedFiles = await getChangedFiles();
@@ -1270,12 +1285,6 @@ export async function run() {
           }
         }
       } else {
-        if (skipVersionKeyword && !token) {
-          logMessage(
-            '⚠️ skip-version-keyword requires a token input for API access, using standard file diff',
-            'warning'
-          );
-        }
         changedFiles = await getChangedFiles();
       }
       logMessage(`Files changed: ${changedFiles.join(', ')}`);
