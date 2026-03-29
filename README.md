@@ -35,6 +35,7 @@ Please refer to the [release page](https://github.com/joshjohanning/npm-version-
 - Node.js project with `package.json`
 - Git tags following semantic versioning (e.g., `v1.0.0`, `v2.1.3`)
 - Used in pull request workflows
+- **Permissions**: `contents: read` and `pull-requests: read` (the action uses the Pulls API to analyze commits)
 
 ## 🚀 Usage
 
@@ -51,21 +52,37 @@ on:
 jobs:
   version-check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v6
 
       - uses: joshjohanning/npm-version-check-action@v2
 ```
 
+> **Note:** The `pull-requests: read` permission is required because the action
+> uses the GitHub Pulls API to retrieve commit messages for `[skip version]`
+> keyword support.
+
 ### Advanced Configuration
 
 ```yaml
-- uses: joshjohanning/npm-version-check-action@v2
-  with:
-    package-path: 'packages/core/package.json' # Custom package.json path
-    tag-prefix: 'v' # Tag prefix (default: 'v')
-    skip-files-check: 'false' # Always run, don't check files
-    include-dev-dependencies: 'true' # Require version bump for devDependencies
+jobs:
+  version-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: joshjohanning/npm-version-check-action@v2
+        with:
+          package-path: 'packages/core/package.json' # Custom package.json path
+          tag-prefix: 'v' # Tag prefix (default: 'v')
+          skip-files-check: 'false' # Always run, don't check files
+          include-dev-dependencies: 'true' # Require version bump for devDependencies
 ```
 
 ### Complete Workflow Example
