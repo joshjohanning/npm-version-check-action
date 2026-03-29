@@ -1313,7 +1313,10 @@ export async function run() {
         // If no commits were found (git error fallback), use regular getChangedFiles
         if (result.totalCommits === 0) {
           logMessage('ℹ️ Could not analyze individual commits, using standard file diff');
-          logMessage(`⚠️ Skip keyword "${skipVersionKeyword}" will be ignored - falling back to full PR diff`, 'warning');
+          logMessage(
+            `⚠️ Skip keyword "${skipVersionKeyword}" will be ignored - falling back to full PR diff`,
+            'warning'
+          );
           changedFiles = await getChangedFiles();
         } else {
           changedFiles = result.files;
