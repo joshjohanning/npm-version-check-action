@@ -45,6 +45,10 @@ const PACKAGE_FILENAMES = [PACKAGE_JSON_FILENAME, PACKAGE_LOCK_JSON_FILENAME];
 const RUNS_BLOCK_PATTERN = /^runs[^\S\r\n]*:/m;
 const DEFAULT_ACTION_YML_PATH = 'action.yml';
 
+// Git history fetching constants
+const DEFAULT_PR_COMMIT_COUNT = 100; // Fallback when PR payload doesn't include commit count
+const FETCH_DEPTH_BUFFER = 10; // Extra depth to ensure base commit is included
+
 /**
  * Log a message using GitHub Actions core logging
  */
@@ -287,9 +291,9 @@ export async function getCommitsWithMessages() {
     // Ensure sufficient git history for enumerating PR commits.
     // With shallow clones (default actions/checkout fetch-depth: 1),
     // intermediate commits between base and head may not be available.
-    const prCommitCount = context.payload.pull_request?.commits || 100;
+    const prCommitCount = context.payload.pull_request?.commits || DEFAULT_PR_COMMIT_COUNT;
     try {
-      await execGit(['fetch', `--deepen=${prCommitCount + 10}`]);
+      await execGit(['fetch', `--deepen=${prCommitCount + FETCH_DEPTH_BUFFER}`]);
     } catch {
       // May already have full history, which is fine
     }
