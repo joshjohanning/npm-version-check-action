@@ -7,7 +7,17 @@ import semver from 'semver';
 
 // Shared constants for validation
 const SAFE_GIT_COMMANDS = ['diff', 'diff-tree', 'fetch', 'log', 'rev-list', 'tag', 'show'];
-const SAFE_GIT_OPTIONS = ['-1', '-l', '-r', '--format=%B', '--name-only', '--no-commit-id', '--tags', '--'];
+const SAFE_GIT_OPTIONS = [
+  '-1',
+  '-l',
+  '-r',
+  '--format=%B',
+  '--format=%H%x1f%B%x1e',
+  '--name-only',
+  '--no-commit-id',
+  '--tags',
+  '--'
+];
 
 // Default skip keyword for bypassing version check on specific commits
 const DEFAULT_SKIP_KEYWORD = '[skip version]';
@@ -277,7 +287,7 @@ export async function getCommitsWithMessages() {
   }
 
   const baseRef = context.payload.pull_request?.base?.sha;
-  const headRef = context.sha;
+  const headRef = context.payload.pull_request?.head?.sha;
 
   if (!baseRef || !headRef) {
     logMessage('⚠️ Could not determine base and head refs for PR', 'warning');
@@ -298,23 +308,24 @@ export async function getCommitsWithMessages() {
       // May already have full history, which is fine
     }
 
-    // Get commit SHAs in the PR range (commits reachable from head but not from base)
-    const shaOutput = await execGit(['rev-list', `${sanitizedBaseRef}..${sanitizedHeadRef}`]);
+    // Get all commits with messages in a single command using ASCII delimiters.
+    // %x1f (Unit Separator) separates SHA from body, %x1e (Record Separator) separates records.
+    // This avoids N+1 round-trips (one rev-list + one log per commit).
+    const output = await execGit(['log', '--format=%H%x1f%B%x1e', `${sanitizedBaseRef}..${sanitizedHeadRef}`]);
 
-    if (!shaOutput) {
+    if (!output || !output.trim()) {
       return [];
     }
 
-    const shas = shaOutput.split('\n').filter(Boolean);
-    logMessage(`📋 Found ${shas.length} commits in PR`, 'debug');
+    const records = output.split('\x1e').filter(r => r.trim());
+    logMessage(`📋 Found ${records.length} commits in PR`, 'debug');
 
-    // Get full commit messages for each SHA
-    const commits = [];
-    for (const sha of shas) {
-      const sanitizedSha = sanitizeSHA(sha, 'commitSha');
-      const message = await execGit(['log', '-1', '--format=%B', sanitizedSha]);
-      commits.push({ sha: sanitizedSha, message });
-    }
+    const commits = records.map(record => {
+      const sepIndex = record.indexOf('\x1f');
+      const sha = record.substring(0, sepIndex).trim();
+      const message = record.substring(sepIndex + 1).trim();
+      return { sha: sanitizeSHA(sha, 'commitSha'), message };
+    });
 
     return commits;
   } catch (error) {
@@ -1231,6 +1242,15 @@ export async function run() {
     // Handle skip-version-keyword: empty string explicitly disables, undefined/not-set uses default
     const skipKeywordInput = core.getInput('skip-version-keyword');
     const skipVersionKeyword = skipKeywordInput === '' ? '' : skipKeywordInput || DEFAULT_SKIP_KEYWORD;
+
+    // Warn if deprecated token input is still provided
+    const tokenInput = core.getInput('token');
+    if (tokenInput) {
+      core.setSecret(tokenInput);
+      core.warning(
+        'The `token` input is deprecated and ignored. The skip-version-keyword feature now uses local git commands instead of the GitHub API.'
+      );
+    }
 
     logMessage(`Package path: ${packagePath}`);
     logMessage(`Tag prefix: ${tagPrefix}`);

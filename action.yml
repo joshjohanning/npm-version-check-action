@@ -35,9 +35,9 @@ inputs:
     required: false
     default: 'false'
   token:
-    description: 'GitHub token for API access. Required for skip-version-keyword feature to work with shallow clones.'
+    description: '[Deprecated] No longer required. The skip-version-keyword feature now uses local git commands. This input is ignored if provided.'
     required: false
-    default: ${{ github.token }}
+    deprecationMessage: 'The token input is no longer needed. The action uses local git commands instead of the GitHub API.'
 
 outputs:
   version-changed:

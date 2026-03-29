@@ -17,6 +17,7 @@ const mockCore = {
   getBooleanInput: jest.fn(() => false),
   setOutput: jest.fn(),
   setFailed: jest.fn(),
+  setSecret: jest.fn(),
   error: jest.fn(),
   warning: jest.fn(),
   info: jest.fn(),
@@ -51,6 +52,9 @@ const mockGithub = {
       pull_request: {
         base: {
           sha: TEST_BASE_SHA
+        },
+        head: {
+          sha: TEST_HEAD_SHA
         },
         number: 123
       }
@@ -982,7 +986,8 @@ describe('hasPackageDependencyChanges', () => {
     mockGithub.context.sha = TEST_HEAD_SHA;
     mockGithub.context.payload = {
       pull_request: {
-        base: { sha: TEST_BASE_SHA }
+        base: { sha: TEST_BASE_SHA },
+        head: { sha: TEST_HEAD_SHA }
       }
     };
 
@@ -3015,7 +3020,11 @@ describe('npm Version Check Action - Integration Tests', () => {
     beforeEach(() => {
       mockGithub.context.eventName = 'pull_request';
       mockGithub.context.sha = TEST_HEAD_SHA;
-      mockGithub.context.payload.pull_request = { base: { sha: TEST_BASE_SHA }, number: 123 };
+      mockGithub.context.payload.pull_request = {
+        base: { sha: TEST_BASE_SHA },
+        head: { sha: TEST_HEAD_SHA },
+        number: 123
+      };
       mockGithub.context.repo = { owner: 'test-owner', repo: 'test-repo' };
     });
 
@@ -3024,18 +3033,12 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch') return 0;
-        if (args[0] === 'rev-list') {
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
           options.listeners.stdout(
-            Buffer.from('abc1234567890abcdef1234567890abcdef1234\ndef4567890abcdef1234567890abcdef123456\n')
+            Buffer.from(
+              'abc1234567890abcdef1234567890abcdef1234\x1fAdd feature\n\nDetailed description\x1edef4567890abcdef1234567890abcdef123456\x1fFix bug\x1e'
+            )
           );
-          return 0;
-        }
-        if (args[0] === 'log') {
-          if (args[3] === 'abc1234567890abcdef1234567890abcdef1234') {
-            options.listeners.stdout(Buffer.from('Add feature\n\nDetailed description'));
-          } else if (args[3] === 'def4567890abcdef1234567890abcdef123456') {
-            options.listeners.stdout(Buffer.from('Fix bug'));
-          }
           return 0;
         }
         return 0;
@@ -3064,12 +3067,12 @@ describe('npm Version Check Action - Integration Tests', () => {
       expect(commits).toEqual([]);
     });
 
-    test('should return empty array when git rev-list returns no commits', async () => {
+    test('should return empty array when git log returns no commits', async () => {
       const { getCommitsWithMessages } = indexModule;
 
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch') return 0;
-        if (args[0] === 'rev-list') {
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
           options.listeners.stdout(Buffer.from(''));
           return 0;
         }
@@ -3095,15 +3098,15 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockExec.exec.mockImplementation(async (command, args, _options) => {
         if (args[0] === 'fetch') return 0;
-        if (args[0] === 'rev-list') {
-          throw new Error('git rev-list failed');
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
+          throw new Error('git log failed');
         }
         return 0;
       });
 
       const commits = await getCommitsWithMessages();
       expect(commits).toEqual([]);
-      expect(mockCore.warning).toHaveBeenCalledWith('⚠️ Could not fetch PR commits via git: git rev-list failed');
+      expect(mockCore.warning).toHaveBeenCalledWith('⚠️ Could not fetch PR commits via git: git log failed');
     });
   });
 
@@ -3170,7 +3173,11 @@ describe('npm Version Check Action - Integration Tests', () => {
     beforeEach(() => {
       mockGithub.context.eventName = 'pull_request';
       mockGithub.context.sha = TEST_HEAD_SHA;
-      mockGithub.context.payload.pull_request = { base: { sha: TEST_BASE_SHA }, number: 123 };
+      mockGithub.context.payload.pull_request = {
+        base: { sha: TEST_BASE_SHA },
+        head: { sha: TEST_HEAD_SHA },
+        number: 123
+      };
       mockGithub.context.repo = { owner: 'test-owner', repo: 'test-repo' };
     });
 
@@ -3179,18 +3186,12 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch') return 0;
-        if (args[0] === 'rev-list') {
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
           options.listeners.stdout(
-            Buffer.from('abc1234567890abcdef1234567890abcdef1234\ndef4567890abcdef1234567890abcdef123456\n')
+            Buffer.from(
+              'abc1234567890abcdef1234567890abcdef1234\x1f[skip version] Fix typo\x1edef4567890abcdef1234567890abcdef123456\x1fAdd feature\x1e'
+            )
           );
-          return 0;
-        }
-        if (args[0] === 'log') {
-          if (args[3] === 'abc1234567890abcdef1234567890abcdef1234') {
-            options.listeners.stdout(Buffer.from('[skip version] Fix typo'));
-          } else if (args[3] === 'def4567890abcdef1234567890abcdef123456') {
-            options.listeners.stdout(Buffer.from('Add feature'));
-          }
           return 0;
         }
         if (args[0] === 'diff-tree') {
@@ -3214,18 +3215,12 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch') return 0;
-        if (args[0] === 'rev-list') {
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
           options.listeners.stdout(
-            Buffer.from('abc1234567890abcdef1234567890abcdef1234\ndef4567890abcdef1234567890abcdef123456\n')
+            Buffer.from(
+              'abc1234567890abcdef1234567890abcdef1234\x1fAdd feature\x1edef4567890abcdef1234567890abcdef123456\x1fFix bug\x1e'
+            )
           );
-          return 0;
-        }
-        if (args[0] === 'log') {
-          if (args[3] === 'abc1234567890abcdef1234567890abcdef1234') {
-            options.listeners.stdout(Buffer.from('Add feature'));
-          } else if (args[3] === 'def4567890abcdef1234567890abcdef123456') {
-            options.listeners.stdout(Buffer.from('Fix bug'));
-          }
           return 0;
         }
         if (args[0] === 'diff-tree') {
@@ -3252,14 +3247,10 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch') return 0;
-        if (args[0] === 'rev-list') {
-          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\n'));
-          return 0;
-        }
-        if (args[0] === 'log') {
-          if (args[3] === 'abc1234567890abcdef1234567890abcdef1234') {
-            options.listeners.stdout(Buffer.from('[skip version] Fix typo'));
-          }
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
+          options.listeners.stdout(
+            Buffer.from('abc1234567890abcdef1234567890abcdef1234\x1f[skip version] Fix typo\x1e')
+          );
           return 0;
         }
         return 0;
@@ -3277,18 +3268,12 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch') return 0;
-        if (args[0] === 'rev-list') {
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
           options.listeners.stdout(
-            Buffer.from('abc1234567890abcdef1234567890abcdef1234\ndef4567890abcdef1234567890abcdef123456\n')
+            Buffer.from(
+              'abc1234567890abcdef1234567890abcdef1234\x1fAdd feature\x1edef4567890abcdef1234567890abcdef123456\x1fFix bug\x1e'
+            )
           );
-          return 0;
-        }
-        if (args[0] === 'log') {
-          if (args[3] === 'abc1234567890abcdef1234567890abcdef1234') {
-            options.listeners.stdout(Buffer.from('Add feature'));
-          } else if (args[3] === 'def4567890abcdef1234567890abcdef123456') {
-            options.listeners.stdout(Buffer.from('Fix bug'));
-          }
           return 0;
         }
         if (args[0] === 'diff-tree') {
@@ -3315,18 +3300,12 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch') return 0;
-        if (args[0] === 'rev-list') {
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
           options.listeners.stdout(
-            Buffer.from('abc1234567890abcdef1234567890abcdef1234\ndef4567890abcdef1234567890abcdef123456\n')
+            Buffer.from(
+              'abc1234567890abcdef1234567890abcdef1234\x1f[skip version] Fix typo in index\x1edef4567890abcdef1234567890abcdef123456\x1fAdd feature to index\x1e'
+            )
           );
-          return 0;
-        }
-        if (args[0] === 'log') {
-          if (args[3] === 'abc1234567890abcdef1234567890abcdef1234') {
-            options.listeners.stdout(Buffer.from('[skip version] Fix typo in index'));
-          } else if (args[3] === 'def4567890abcdef1234567890abcdef123456') {
-            options.listeners.stdout(Buffer.from('Add feature to index'));
-          }
           return 0;
         }
         if (args[0] === 'diff-tree') {
@@ -3352,7 +3331,7 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch') return 0;
-        if (args[0] === 'rev-list') {
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
           options.listeners.stdout(Buffer.from(''));
           return 0;
         }
@@ -3371,22 +3350,12 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch') return 0;
-        if (args[0] === 'rev-list') {
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
           options.listeners.stdout(
-            Buffer.from('abc1234567890abcdef1234567890abcdef1234\ndef4567890abcdef1234567890abcdef123456\n')
+            Buffer.from(
+              'abc1234567890abcdef1234567890abcdef1234\x1frefactor: extract functions to improve testability\n\n- Extract helper functions\n- Improve coverage\n\n[skip version]\x1edef4567890abcdef1234567890abcdef123456\x1ffeat: add new feature\x1e'
+            )
           );
-          return 0;
-        }
-        if (args[0] === 'log') {
-          if (args[3] === 'abc1234567890abcdef1234567890abcdef1234') {
-            options.listeners.stdout(
-              Buffer.from(
-                'refactor: extract functions to improve testability\n\n- Extract helper functions\n- Improve coverage\n\n[skip version]'
-              )
-            );
-          } else if (args[3] === 'def4567890abcdef1234567890abcdef123456') {
-            options.listeners.stdout(Buffer.from('feat: add new feature'));
-          }
           return 0;
         }
         if (args[0] === 'diff-tree') {
@@ -3410,18 +3379,12 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch') return 0;
-        if (args[0] === 'rev-list') {
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
           options.listeners.stdout(
-            Buffer.from('abc1234567890abcdef1234567890abcdef1234\ndef4567890abcdef1234567890abcdef123456\n')
+            Buffer.from(
+              'abc1234567890abcdef1234567890abcdef1234\x1f[skip version] fix: typo in documentation\x1edef4567890abcdef1234567890abcdef123456\x1ffeat: add new feature\x1e'
+            )
           );
-          return 0;
-        }
-        if (args[0] === 'log') {
-          if (args[3] === 'abc1234567890abcdef1234567890abcdef1234') {
-            options.listeners.stdout(Buffer.from('[skip version] fix: typo in documentation'));
-          } else if (args[3] === 'def4567890abcdef1234567890abcdef123456') {
-            options.listeners.stdout(Buffer.from('feat: add new feature'));
-          }
           return 0;
         }
         if (args[0] === 'diff-tree') {
@@ -3445,18 +3408,12 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch') return 0;
-        if (args[0] === 'rev-list') {
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
           options.listeners.stdout(
-            Buffer.from('abc1234567890abcdef1234567890abcdef1234\ndef4567890abcdef1234567890abcdef123456\n')
+            Buffer.from(
+              'abc1234567890abcdef1234567890abcdef1234\x1fdocs: update README\n\n[skip version]\x1edef4567890abcdef1234567890abcdef123456\x1fchore: fix linting\n\nMinor fixes\n\n[skip version]\x1e'
+            )
           );
-          return 0;
-        }
-        if (args[0] === 'log') {
-          if (args[3] === 'abc1234567890abcdef1234567890abcdef1234') {
-            options.listeners.stdout(Buffer.from('docs: update README\n\n[skip version]'));
-          } else if (args[3] === 'def4567890abcdef1234567890abcdef123456') {
-            options.listeners.stdout(Buffer.from('chore: fix linting\n\nMinor fixes\n\n[skip version]'));
-          }
           return 0;
         }
         return 0;
@@ -3474,22 +3431,12 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch') return 0;
-        if (args[0] === 'rev-list') {
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
           options.listeners.stdout(
             Buffer.from(
-              'abc1234567890abcdef1234567890abcdef1234\ndef4567890abcdef1234567890abcdef123456\nccc7890abcdef1234567890abcdef1234567890\n'
+              'abc1234567890abcdef1234567890abcdef1234\x1f[SKIP VERSION] uppercase keyword\x1edef4567890abcdef1234567890abcdef123456\x1f[Skip Version] mixed case keyword\x1eccc7890abcdef1234567890abcdef1234567890\x1ffeat: add feature\x1e'
             )
           );
-          return 0;
-        }
-        if (args[0] === 'log') {
-          if (args[3] === 'abc1234567890abcdef1234567890abcdef1234') {
-            options.listeners.stdout(Buffer.from('[SKIP VERSION] uppercase keyword'));
-          } else if (args[3] === 'def4567890abcdef1234567890abcdef123456') {
-            options.listeners.stdout(Buffer.from('[Skip Version] mixed case keyword'));
-          } else if (args[3] === 'ccc7890abcdef1234567890abcdef1234567890') {
-            options.listeners.stdout(Buffer.from('feat: add feature'));
-          }
           return 0;
         }
         if (args[0] === 'diff-tree') {
@@ -3585,7 +3532,11 @@ describe('npm Version Check Action - Integration Tests', () => {
       // Set up GitHub context for PR
       mockGithub.context.eventName = 'pull_request';
       mockGithub.context.sha = TEST_HEAD_SHA;
-      mockGithub.context.payload.pull_request = { base: { sha: TEST_BASE_SHA }, number: 123 };
+      mockGithub.context.payload.pull_request = {
+        base: { sha: TEST_BASE_SHA },
+        head: { sha: TEST_HEAD_SHA },
+        number: 123
+      };
       mockGithub.context.repo = { owner: 'test-owner', repo: 'test-repo' };
     });
 
@@ -3595,12 +3546,8 @@ describe('npm Version Check Action - Integration Tests', () => {
       // Mock git commands for commits and package.json diff comparison
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch' && args[1]?.startsWith('--deepen')) return 0;
-        if (args[0] === 'rev-list') {
-          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\n'));
-          return 0;
-        }
-        if (args[0] === 'log') {
-          options.listeners.stdout(Buffer.from('Add new feature'));
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
+          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\x1fAdd new feature\x1e'));
           return 0;
         }
         if (args[0] === 'diff-tree') {
@@ -3633,12 +3580,8 @@ describe('npm Version Check Action - Integration Tests', () => {
       // Mock git commands for commits and file changes
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch' && args[1]?.startsWith('--deepen')) return 0;
-        if (args[0] === 'rev-list') {
-          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\n'));
-          return 0;
-        }
-        if (args[0] === 'log') {
-          options.listeners.stdout(Buffer.from('Add new feature'));
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
+          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\x1fAdd new feature\x1e'));
           return 0;
         }
         if (args[0] === 'diff-tree') {
@@ -3670,12 +3613,8 @@ describe('npm Version Check Action - Integration Tests', () => {
       // Mock git commands for commits
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch' && args[1]?.startsWith('--deepen')) return 0;
-        if (args[0] === 'rev-list') {
-          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\n'));
-          return 0;
-        }
-        if (args[0] === 'log') {
-          options.listeners.stdout(Buffer.from('Add new feature'));
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
+          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\x1fAdd new feature\x1e'));
           return 0;
         }
         if (args[0] === 'diff-tree') {
@@ -3705,12 +3644,8 @@ describe('npm Version Check Action - Integration Tests', () => {
       // Mock git commands for commits
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch' && args[1]?.startsWith('--deepen')) return 0;
-        if (args[0] === 'rev-list') {
-          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\n'));
-          return 0;
-        }
-        if (args[0] === 'log') {
-          options.listeners.stdout(Buffer.from('Add new feature'));
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
+          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\x1fAdd new feature\x1e'));
           return 0;
         }
         if (args[0] === 'diff-tree') {
@@ -3743,12 +3678,8 @@ describe('npm Version Check Action - Integration Tests', () => {
       // Mock git commands for commits
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch' && args[1]?.startsWith('--deepen')) return 0;
-        if (args[0] === 'rev-list') {
-          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\n'));
-          return 0;
-        }
-        if (args[0] === 'log') {
-          options.listeners.stdout(Buffer.from('Add new feature'));
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
+          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\x1fAdd new feature\x1e'));
           return 0;
         }
         if (args[0] === 'diff-tree') {
@@ -3781,12 +3712,8 @@ describe('npm Version Check Action - Integration Tests', () => {
       // Mock git commands for commits
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch' && args[1]?.startsWith('--deepen')) return 0;
-        if (args[0] === 'rev-list') {
-          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\n'));
-          return 0;
-        }
-        if (args[0] === 'log') {
-          options.listeners.stdout(Buffer.from('Add new feature'));
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
+          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\x1fAdd new feature\x1e'));
           return 0;
         }
         if (args[0] === 'diff-tree') {
@@ -3819,12 +3746,8 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch' && args[1]?.startsWith('--deepen')) return 0;
-        if (args[0] === 'rev-list') {
-          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\n'));
-          return 0;
-        }
-        if (args[0] === 'log') {
-          options.listeners.stdout(Buffer.from('Upgrade runtime'));
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
+          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\x1fUpgrade runtime\x1e'));
           return 0;
         }
         if (args[0] === 'diff-tree') {
@@ -3864,12 +3787,8 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch' && args[1]?.startsWith('--deepen')) return 0;
-        if (args[0] === 'rev-list') {
-          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\n'));
-          return 0;
-        }
-        if (args[0] === 'log') {
-          options.listeners.stdout(Buffer.from('Upgrade runtime'));
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
+          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\x1fUpgrade runtime\x1e'));
           return 0;
         }
         if (args[0] === 'diff-tree') {
@@ -3946,12 +3865,8 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch' && args[1]?.startsWith('--deepen')) return 0;
-        if (args[0] === 'rev-list') {
-          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\n'));
-          return 0;
-        }
-        if (args[0] === 'log') {
-          options.listeners.stdout(Buffer.from('Add feature'));
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
+          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\x1fAdd feature\x1e'));
           return 0;
         }
         if (args[0] === 'diff-tree') {
@@ -3987,12 +3902,8 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch' && args[1]?.startsWith('--deepen')) return 0;
-        if (args[0] === 'rev-list') {
-          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\n'));
-          return 0;
-        }
-        if (args[0] === 'log') {
-          options.listeners.stdout(Buffer.from('Add feature'));
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
+          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\x1fAdd feature\x1e'));
           return 0;
         }
         if (args[0] === 'diff-tree') {
@@ -4025,12 +3936,8 @@ describe('npm Version Check Action - Integration Tests', () => {
       // Make action.yml retrieval fail with an unexpected error on both refs
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch' && args[1]?.startsWith('--deepen')) return 0;
-        if (args[0] === 'rev-list') {
-          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\n'));
-          return 0;
-        }
-        if (args[0] === 'log') {
-          options.listeners.stdout(Buffer.from('Add feature'));
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
+          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\x1fAdd feature\x1e'));
           return 0;
         }
         if (args[0] === 'diff-tree') {
@@ -4067,12 +3974,8 @@ describe('npm Version Check Action - Integration Tests', () => {
       // Only action.yml changed - no JS/TS or package dependency changes
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch' && args[1]?.startsWith('--deepen')) return 0;
-        if (args[0] === 'rev-list') {
-          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\n'));
-          return 0;
-        }
-        if (args[0] === 'log') {
-          options.listeners.stdout(Buffer.from('Upgrade runtime'));
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
+          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\x1fUpgrade runtime\x1e'));
           return 0;
         }
         if (args[0] === 'diff-tree') {
@@ -4132,12 +4035,8 @@ describe('npm Version Check Action - Integration Tests', () => {
       // Only action.yml changed
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch' && args[1]?.startsWith('--deepen')) return 0;
-        if (args[0] === 'rev-list') {
-          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\n'));
-          return 0;
-        }
-        if (args[0] === 'log') {
-          options.listeners.stdout(Buffer.from('Upgrade runtime'));
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
+          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\x1fUpgrade runtime\x1e'));
           return 0;
         }
         if (args[0] === 'diff-tree') {
@@ -4168,12 +4067,8 @@ describe('npm Version Check Action - Integration Tests', () => {
       // Only action.yml changed but runtime is the same
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch' && args[1]?.startsWith('--deepen')) return 0;
-        if (args[0] === 'rev-list') {
-          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\n'));
-          return 0;
-        }
-        if (args[0] === 'log') {
-          options.listeners.stdout(Buffer.from('Update description'));
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
+          options.listeners.stdout(Buffer.from('abc1234567890abcdef1234567890abcdef1234\x1fUpdate description\x1e'));
           return 0;
         }
         if (args[0] === 'diff-tree') {
@@ -4267,18 +4162,12 @@ describe('npm Version Check Action - Integration Tests', () => {
       // Mock git commands where all commits have skip keyword
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args[0] === 'fetch' && args[1]?.startsWith('--deepen')) return 0;
-        if (args[0] === 'rev-list') {
+        if (args[0] === 'log' && args[1] === '--format=%H%x1f%B%x1e') {
           options.listeners.stdout(
-            Buffer.from('abc1234567890abcdef1234567890abcdef1234\ndef5678901234567890abcdef1234567890abcd\n')
+            Buffer.from(
+              'abc1234567890abcdef1234567890abcdef1234\x1fFix [skip version]\x1edef5678901234567890abcdef1234567890abcd\x1fUpdate [skip version]\x1e'
+            )
           );
-          return 0;
-        }
-        if (args[0] === 'log') {
-          if (args[3] === 'abc1234567890abcdef1234567890abcdef1234') {
-            options.listeners.stdout(Buffer.from('Fix [skip version]'));
-          } else if (args[3] === 'def5678901234567890abcdef1234567890abcd') {
-            options.listeners.stdout(Buffer.from('Update [skip version]'));
-          }
           return 0;
         }
         // Version check git commands
@@ -4299,6 +4188,45 @@ describe('npm Version Check Action - Integration Tests', () => {
       // When all files are skipped, changedFiles is empty so no relevant changes detected
       expect(mockCore.notice).toHaveBeenCalledWith(
         '⏭️ No JavaScript/TypeScript files or dependency changes detected, skipping version check'
+      );
+    });
+
+    test('should warn when deprecated token input is provided', async () => {
+      const { run } = indexModule;
+
+      mockCore.getInput.mockImplementation(input => {
+        switch (input) {
+          case 'package-path':
+            return 'package.json';
+          case 'tag-prefix':
+            return 'v';
+          case 'skip-files-check':
+            return 'true';
+          case 'token':
+            return 'ghp_test123';
+          case 'skip-version-keyword':
+            return '[skip version]';
+          default:
+            return '';
+        }
+      });
+
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.1.0' }));
+
+      mockExec.exec.mockImplementation(async (command, args, options) => {
+        if (args.includes('tag')) {
+          options.listeners.stdout('v1.0.0');
+        }
+        return 0;
+      });
+
+      mockSemver.compare.mockReturnValue(1);
+
+      await run();
+
+      expect(mockCore.setSecret).toHaveBeenCalledWith('ghp_test123');
+      expect(mockCore.warning).toHaveBeenCalledWith(
+        'The `token` input is deprecated and ignored. The skip-version-keyword feature now uses local git commands instead of the GitHub API.'
       );
     });
 
