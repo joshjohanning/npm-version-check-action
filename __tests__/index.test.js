@@ -2709,7 +2709,8 @@ describe('npm Version Check Action - Integration Tests', () => {
     mockGithub.context.sha = TEST_HEAD_SHA;
     mockGithub.context.payload = {
       pull_request: {
-        base: { sha: TEST_BASE_SHA }
+        base: { sha: TEST_BASE_SHA },
+        head: { sha: TEST_HEAD_SHA }
       }
     };
   });
@@ -3195,11 +3196,12 @@ describe('npm Version Check Action - Integration Tests', () => {
           return 0;
         }
         if (args[0] === 'diff-tree') {
-          if (args[4] === 'def4567890abcdef1234567890abcdef123456') {
+          if (args[5] === 'def4567890abcdef1234567890abcdef123456') {
             options.listeners.stdout(Buffer.from('src/utils.js\nlib/helper.ts\n'));
           }
           return 0;
         }
+        if (args[0] === 'rev-list') return 0;
         return 0;
       });
 
@@ -3224,13 +3226,14 @@ describe('npm Version Check Action - Integration Tests', () => {
           return 0;
         }
         if (args[0] === 'diff-tree') {
-          if (args[4] === 'abc1234567890abcdef1234567890abcdef1234') {
+          if (args[5] === 'abc1234567890abcdef1234567890abcdef1234') {
             options.listeners.stdout(Buffer.from('src/index.js\n'));
-          } else if (args[4] === 'def4567890abcdef1234567890abcdef123456') {
+          } else if (args[5] === 'def4567890abcdef1234567890abcdef123456') {
             options.listeners.stdout(Buffer.from('src/utils.js\n'));
           }
           return 0;
         }
+        if (args[0] === 'rev-list') return 0;
         return 0;
       });
 
@@ -3277,13 +3280,14 @@ describe('npm Version Check Action - Integration Tests', () => {
           return 0;
         }
         if (args[0] === 'diff-tree') {
-          if (args[4] === 'abc1234567890abcdef1234567890abcdef1234') {
+          if (args[5] === 'abc1234567890abcdef1234567890abcdef1234') {
             options.listeners.stdout(Buffer.from('src/index.js\nsrc/utils.js\n'));
-          } else if (args[4] === 'def4567890abcdef1234567890abcdef123456') {
+          } else if (args[5] === 'def4567890abcdef1234567890abcdef123456') {
             options.listeners.stdout(Buffer.from('src/index.js\n')); // Same file as in first commit
           }
           return 0;
         }
+        if (args[0] === 'rev-list') return 0;
         return 0;
       });
 
@@ -3310,11 +3314,12 @@ describe('npm Version Check Action - Integration Tests', () => {
         }
         if (args[0] === 'diff-tree') {
           // Only the non-skipped commit should have files retrieved
-          if (args[4] === 'def4567890abcdef1234567890abcdef123456') {
+          if (args[5] === 'def4567890abcdef1234567890abcdef123456') {
             options.listeners.stdout(Buffer.from('src/index.js\n'));
           }
           return 0;
         }
+        if (args[0] === 'rev-list') return 0;
         return 0;
       });
 
@@ -3359,11 +3364,12 @@ describe('npm Version Check Action - Integration Tests', () => {
           return 0;
         }
         if (args[0] === 'diff-tree') {
-          if (args[4] === 'def4567890abcdef1234567890abcdef123456') {
+          if (args[5] === 'def4567890abcdef1234567890abcdef123456') {
             options.listeners.stdout(Buffer.from('src/feature.js\n'));
           }
           return 0;
         }
+        if (args[0] === 'rev-list') return 0;
         return 0;
       });
 
@@ -3388,11 +3394,12 @@ describe('npm Version Check Action - Integration Tests', () => {
           return 0;
         }
         if (args[0] === 'diff-tree') {
-          if (args[4] === 'def4567890abcdef1234567890abcdef123456') {
+          if (args[5] === 'def4567890abcdef1234567890abcdef123456') {
             options.listeners.stdout(Buffer.from('src/feature.js\n'));
           }
           return 0;
         }
+        if (args[0] === 'rev-list') return 0;
         return 0;
       });
 
@@ -3440,11 +3447,12 @@ describe('npm Version Check Action - Integration Tests', () => {
           return 0;
         }
         if (args[0] === 'diff-tree') {
-          if (args[4] === 'ccc7890abcdef1234567890abcdef1234567890') {
+          if (args[5] === 'ccc7890abcdef1234567890abcdef1234567890') {
             options.listeners.stdout(Buffer.from('src/feature.js\n'));
           }
           return 0;
         }
+        if (args[0] === 'rev-list') return 0;
         return 0;
       });
 

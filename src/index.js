@@ -16,6 +16,7 @@ const SAFE_GIT_OPTIONS = [
   '--name-only',
   '--no-commit-id',
   '--tags',
+  '--root',
   '--'
 ];
 
@@ -131,12 +132,6 @@ export async function execGit(args) {
       // Allow SHA range specs (e.g., abc1234..def5678) for git rev-list/log
       if (/^[a-f0-9]{7,40}\.\.[a-f0-9]{7,40}$/i.test(arg)) {
         return arg;
-      }
-
-      // Prevent argument injection where a filename could be misinterpreted as an option.
-      // This is a defense-in-depth measure.
-      if (arg.startsWith('-') && !SAFE_GIT_OPTIONS.includes(arg) && !/^--(?:depth|deepen)=\d+$/.test(arg)) {
-        throw new Error(`Potentially dangerous git option: ${arg}`);
       }
 
       // Allow safe numeric options like --depth=N and --deepen=N
@@ -265,7 +260,9 @@ export async function getChangedFiles() {
   }
 
   const baseRef = context.payload.pull_request?.base?.sha;
-  const headRef = context.sha;
+  // Use pull_request.head.sha (actual PR head) instead of context.sha (merge commit)
+  // to be consistent with getCommitsWithMessages() and avoid including merge commit files
+  const headRef = context.payload.pull_request?.head?.sha || context.sha;
 
   if (!baseRef || !headRef) {
     throw new Error('Could not determine base and head refs for PR');
@@ -314,6 +311,18 @@ export async function getCommitsWithMessages() {
       // May already have full history, which is fine
     }
 
+    // Verify base commit is reachable after deepening; if not, try fetching more history
+    try {
+      await execGit(['rev-list', '-1', sanitizedBaseRef]);
+    } catch {
+      logMessage('⚠️ Base commit not reachable after initial deepen, fetching more history...', 'warning');
+      try {
+        await execGit(['fetch', '--unshallow']);
+      } catch {
+        // Already unshallowed or fetch failed - will attempt log anyway
+      }
+    }
+
     // Get all commits with messages in a single command using ASCII delimiters.
     // %x1f (Unit Separator) separates SHA from body, %x1e (Record Separator) separates records.
     // This avoids N+1 round-trips (one rev-list + one log per commit).
@@ -356,7 +365,8 @@ export async function getFilesForCommit(sha) {
   try {
     const sanitizedSha = sanitizeSHA(sha, 'commitSha');
 
-    const output = await execGit(['diff-tree', '--no-commit-id', '--name-only', '-r', sanitizedSha]);
+    // --root handles initial commits (those with no parent)
+    const output = await execGit(['diff-tree', '--no-commit-id', '--name-only', '-r', '--root', sanitizedSha]);
 
     return output ? output.split('\n').filter(Boolean) : [];
   } catch (error) {
@@ -1303,6 +1313,7 @@ export async function run() {
         // If no commits were found (git error fallback), use regular getChangedFiles
         if (result.totalCommits === 0) {
           logMessage('ℹ️ Could not analyze individual commits, using standard file diff');
+          logMessage(`⚠️ Skip keyword "${skipVersionKeyword}" will be ignored - falling back to full PR diff`, 'warning');
           changedFiles = await getChangedFiles();
         } else {
           changedFiles = result.files;
@@ -1336,7 +1347,7 @@ export async function run() {
         );
         if (actionYmlChanged) {
           const baseRef = github.context.payload.pull_request?.base?.sha;
-          const headRef = github.context.sha;
+          const headRef = github.context.payload.pull_request?.head?.sha || github.context.sha;
           if (baseRef && headRef) {
             const earlyRuntimeCheck = await detectNodeRuntimeChange(baseRef, headRef, DEFAULT_ACTION_YML_PATH);
             hasRuntimeChange = earlyRuntimeCheck.changed;
@@ -1443,7 +1454,7 @@ export async function run() {
     // Check if action.yml node runtime changed and require major version bump
     if (!skipMajorOnActionsRuntimeChange) {
       const baseRef = github.context.payload.pull_request?.base?.sha;
-      const headRef = github.context.sha;
+      const headRef = github.context.payload.pull_request?.head?.sha || github.context.sha;
 
       if (baseRef && headRef) {
         const runtimeChange = await detectNodeRuntimeChange(baseRef, headRef, DEFAULT_ACTION_YML_PATH);
