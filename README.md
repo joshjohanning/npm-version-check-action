@@ -62,8 +62,8 @@ jobs:
 ```
 
 > **Note:** The `pull-requests: read` permission is required because the action
-> uses the GitHub Pulls API to retrieve commit messages for `[skip version]`
-> keyword support.
+> uses the GitHub Pulls API to retrieve commits from the pull request for
+> per-commit file analysis and `[skip version]` keyword support.
 
 ### Advanced Configuration
 
