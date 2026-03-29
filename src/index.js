@@ -295,10 +295,7 @@ export async function getCommitsWithMessages() {
     }
 
     // Get commit SHAs in the PR range (commits reachable from head but not from base)
-    const shaOutput = await execGit([
-      'rev-list',
-      `${sanitizedBaseRef}..${sanitizedHeadRef}`
-    ]);
+    const shaOutput = await execGit(['rev-list', `${sanitizedBaseRef}..${sanitizedHeadRef}`]);
 
     if (!shaOutput) {
       return [];
@@ -371,9 +368,7 @@ export async function getChangedFilesWithSkipSupport(skipKeyword) {
   }
 
   // Fetch files for all non-skipped commits in parallel
-  const fileResults = await Promise.all(
-    nonSkippedCommits.map(commit => getFilesForCommit(commit.sha))
-  );
+  const fileResults = await Promise.all(nonSkippedCommits.map(commit => getFilesForCommit(commit.sha)));
 
   // Collect all unique files
   for (const files of fileResults) {
