@@ -4047,11 +4047,9 @@ describe('npm Version Check Action - Integration Tests', () => {
           data: { files: [{ filename: 'src/file2.ts' }] }
         });
 
-      // Mock git commands for version check
+      // Mock git commands for show (version check not reached in this flow)
       mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('tag')) {
-          options.listeners.stdout('v1.0.0');
-        } else if (args.includes('show')) {
+        if (args.includes('show')) {
           options.listeners.stdout('{}');
         }
         return 0;

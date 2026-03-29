@@ -35,7 +35,7 @@ inputs:
     required: false
     default: 'false'
   token:
-    description: 'GitHub token for API access. Required for skip-version-keyword feature to work with shallow clones.'
+    description: 'GitHub token for API access. Used for fetching repository tags and commit analysis.'
     required: false
     default: ${{ github.token }}
 
