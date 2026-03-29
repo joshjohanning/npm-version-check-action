@@ -133,6 +133,12 @@ export async function execGit(args) {
         return arg;
       }
 
+      // Prevent argument injection where a filename could be misinterpreted as an option.
+      // This is a defense-in-depth measure.
+      if (arg.startsWith('-') && !SAFE_GIT_OPTIONS.includes(arg) && !/^--(?:depth|deepen)=\d+$/.test(arg)) {
+        throw new Error(`Potentially dangerous git option: ${arg}`);
+      }
+
       // Allow safe numeric options like --depth=N and --deepen=N
       if (/^--(?:depth|deepen)=\d+$/.test(arg)) {
         return arg;
