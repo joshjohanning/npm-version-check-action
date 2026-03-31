@@ -67,7 +67,11 @@ const mockGithub = {
 // Mock semver
 const mockSemver = {
   compare: jest.fn(),
-  valid: jest.fn(v => v)
+  valid: jest.fn(v => {
+    const semverRegex =
+      /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?(?:\+[0-9A-Za-z-.]+)?$/;
+    return semverRegex.test(v) ? v : null;
+  })
 };
 
 // Mock fs
@@ -2764,7 +2768,8 @@ describe('npm Version Check Action - Integration Tests', () => {
       const { execGit } = indexModule;
 
       await expect(execGit(['diff', '--dangerous-option'])).rejects.toThrow('Potentially dangerous git option');
-      await expect(execGit(['fetch', '--upload-pack'])).rejects.toThrow('Unsupported git command');
+      await expect(execGit(['diff', '--upload-pack'])).rejects.toThrow('Dangerous git option detected');
+      await expect(execGit(['show', '--exec=/bin/sh'])).rejects.toThrow('Dangerous git option detected');
     });
 
     test('should allow valid SHA hashes', async () => {
