@@ -136,7 +136,7 @@ jobs:
 | `skip-version-keyword`                 | Keyword in commit messages to skip version check for that commit's files. Set to `''` to disable        | No       | `[skip version]`      |
 | `skip-version-consistency-check`       | Skip the check that validates package.json and package-lock.json have matching versions                 | No       | `false`               |
 | `skip-major-on-actions-runtime-change` | Skip the check that requires a major version bump when `action.yml` changes its Node.js Actions runtime | No       | `false`               |
-| `token`                                | GitHub token for API access (required for `skip-version-keyword` to analyze commits)                    | No       | `${{ github.token }}` |
+| `token`                                | GitHub token for API access. Used for fetching repository tags and commit analysis                      | No       | `${{ github.token }}` |
 
 ## 📤 Outputs
 
