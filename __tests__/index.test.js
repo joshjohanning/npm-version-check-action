@@ -2909,6 +2909,17 @@ describe('npm Version Check Action - Integration Tests', () => {
         'Failed to fetch repository tags: API error'
       );
     });
+
+    test('should throw a clear error when token is empty or undefined', async () => {
+      const { getLatestVersionTag } = indexModule;
+
+      await expect(getLatestVersionTag('v', '')).rejects.toThrow(
+        'Failed to fetch repository tags: GitHub token is required for fetching repository tags'
+      );
+      await expect(getLatestVersionTag('v', undefined)).rejects.toThrow(
+        'Failed to fetch repository tags: GitHub token is required for fetching repository tags'
+      );
+    });
   });
 
   describe('Version comparison scenarios', () => {
