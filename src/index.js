@@ -1135,6 +1135,10 @@ export function validatePackageVersionConsistency(packagePath) {
  */
 export async function getLatestVersionTag(tagPrefix, token) {
   try {
+    if (!token) {
+      throw new Error('GitHub token is required for fetching repository tags. Ensure the token input is configured.');
+    }
+
     const octokit = github.getOctokit(token);
     const { owner, repo } = github.context.repo;
 
@@ -1147,22 +1151,29 @@ export async function getLatestVersionTag(tagPrefix, token) {
 
     const tagNames = tags.map(tag => tag.name);
 
-    // Filter tags that match the version pattern
-    const versionPattern = new RegExp(`^${tagPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[0-9]+\\.[0-9]+\\.[0-9]+`);
-    const versionTags = tagNames.filter(name => versionPattern.test(name));
+    // Build a list of tags with valid semver versions after the prefix
+    const versionEntries = tagNames
+      .filter(name => name.startsWith(tagPrefix))
+      .map(name => {
+        const version = name.substring(tagPrefix.length);
+        const validVersion = semver.valid(version);
+        if (!validVersion) {
+          return null;
+        }
+        return { tag: name, version: validVersion };
+      })
+      .filter(entry => entry !== null);
 
-    if (versionTags.length === 0) {
+    if (versionEntries.length === 0) {
       return null;
     }
 
     // Sort tags by version and get the latest
-    const sortedTags = versionTags.sort((a, b) => {
-      const versionA = a.replace(tagPrefix, '');
-      const versionB = b.replace(tagPrefix, '');
-      return semver.compare(versionA, versionB);
-    });
+    const sortedEntries = versionEntries.sort((a, b) =>
+      semver.compare(a.version, b.version)
+    );
 
-    return sortedTags[sortedTags.length - 1];
+    return sortedEntries[sortedEntries.length - 1].tag;
   } catch (error) {
     throw new Error(`Failed to fetch repository tags: ${error.message}`);
   }

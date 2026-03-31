@@ -66,7 +66,8 @@ const mockGithub = {
 
 // Mock semver
 const mockSemver = {
-  compare: jest.fn()
+  compare: jest.fn(),
+  valid: jest.fn(v => v)
 };
 
 // Mock fs
@@ -3427,10 +3428,13 @@ describe('npm Version Check Action - Integration Tests', () => {
     test('should handle package dependency changes logging', async () => {
       const { run } = indexModule;
 
-      // Mock API responses for commits
-      mockOctokit.paginate.mockResolvedValue([
-        { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add new feature' } }
-      ]);
+      // Mock API responses for commits and tags
+      mockOctokit.paginate.mockImplementation(async method => {
+        if (method === mockOctokit.rest.repos.listTags) {
+          return [{ name: 'v1.0.0' }];
+        }
+        return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add new feature' } }];
+      });
 
       mockOctokit.rest.repos.getCommit.mockResolvedValue({
         data: { files: [{ filename: 'package.json' }, { filename: 'src/index.js' }] }
@@ -3442,8 +3446,6 @@ describe('npm Version Check Action - Integration Tests', () => {
           options.listeners.stdout('{ "name": "test", "dependencies": { "lodash": "^4.0.0" } }');
         } else if (args.includes('show') && args[1] === `${TEST_HEAD_SHA}:package.json`) {
           options.listeners.stdout('{ "name": "test", "dependencies": { "lodash": "^4.1.0" } }');
-        } else if (args.includes('tag')) {
-          options.listeners.stdout('v1.0.0');
         }
         return 0;
       });
@@ -3459,10 +3461,13 @@ describe('npm Version Check Action - Integration Tests', () => {
     test('should handle regular file changes logging', async () => {
       const { run } = indexModule;
 
-      // Mock API responses for commits
-      mockOctokit.paginate.mockResolvedValue([
-        { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add new feature' } }
-      ]);
+      // Mock API responses for commits and tags
+      mockOctokit.paginate.mockImplementation(async method => {
+        if (method === mockOctokit.rest.repos.listTags) {
+          return [{ name: 'v1.0.0' }];
+        }
+        return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add new feature' } }];
+      });
 
       mockOctokit.rest.repos.getCommit.mockResolvedValue({
         data: { files: [{ filename: 'src/index.js' }, { filename: 'lib/utils.ts' }] }
@@ -3472,8 +3477,6 @@ describe('npm Version Check Action - Integration Tests', () => {
       mockExec.exec.mockImplementation(async (command, args, options) => {
         if (args.includes('show') && args[1].includes('package.json')) {
           options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
-        } else if (args.includes('tag')) {
-          options.listeners.stdout('v1.0.0');
         }
         return 0;
       });
@@ -3490,22 +3493,19 @@ describe('npm Version Check Action - Integration Tests', () => {
     test('should handle first release scenario', async () => {
       const { run } = indexModule;
 
-      // Mock API responses for commits
-      mockOctokit.paginate.mockResolvedValue([
-        { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add new feature' } }
-      ]);
+      // Mock API responses for commits and no existing tags
+      mockOctokit.paginate.mockImplementation(async method => {
+        if (method === mockOctokit.rest.repos.listTags) {
+          return []; // No tags
+        }
+        return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add new feature' } }];
+      });
 
       mockOctokit.rest.repos.getCommit.mockResolvedValue({
         data: { files: [{ filename: 'src/index.js' }] }
       });
 
-      // Mock no existing tags
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('tag')) {
-          options.listeners.stdout(''); // No tags
-        }
-        return 0;
-      });
+      mockExec.exec.mockResolvedValue(0);
 
       await run();
 
@@ -3969,6 +3969,8 @@ describe('npm Version Check Action - Integration Tests', () => {
         switch (input) {
           case 'skip-files-check':
             return 'true';
+          case 'token':
+            return 'test-token';
           default:
             return '';
         }
