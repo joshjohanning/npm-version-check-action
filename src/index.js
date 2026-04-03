@@ -1218,6 +1218,25 @@ export function isSequentialVersion(current, previous) {
   const { major: curMajor, minor: curMinor, patch: curPatch } = currentParsed;
   const { major: prevMajor, minor: prevMinor, patch: prevPatch } = previousParsed;
 
+  // Guard: only classify bump type when current is strictly higher
+  const cmp = semver.compare(current, previous);
+  if (cmp <= 0) {
+    if (cmp === 0) {
+      return {
+        isSequential: false,
+        incrementType: null,
+        expectedVersion: null,
+        message: `Versions are equal: ${current}`
+      };
+    }
+    return {
+      isSequential: false,
+      incrementType: null,
+      expectedVersion: null,
+      message: `Version ${current} is lower than ${previous}`
+    };
+  }
+
   // Determine which component changed
   if (curMajor > prevMajor) {
     const expectedVersion = `${prevMajor + 1}.0.0`;
@@ -1237,7 +1256,7 @@ export function isSequentialVersion(current, previous) {
     };
   }
 
-  if (curMinor > prevMinor) {
+  if (curMajor === prevMajor && curMinor > prevMinor) {
     const expectedVersion = `${prevMajor}.${prevMinor + 1}.0`;
     if (curMinor === prevMinor + 1 && curPatch === 0) {
       return {
@@ -1255,7 +1274,7 @@ export function isSequentialVersion(current, previous) {
     };
   }
 
-  if (curPatch > prevPatch) {
+  if (curMajor === prevMajor && curMinor === prevMinor && curPatch > prevPatch) {
     const expectedVersion = `${prevMajor}.${prevMinor}.${prevPatch + 1}`;
     if (curPatch === prevPatch + 1) {
       return {
@@ -1273,26 +1292,8 @@ export function isSequentialVersion(current, previous) {
     };
   }
 
-  // No major/minor/patch component increased — distinguish equal, lower, and prerelease-only changes
-  const cmp = semver.compare(current, previous);
-  if (cmp === 0) {
-    return {
-      isSequential: false,
-      incrementType: null,
-      expectedVersion: null,
-      message: `Versions are equal: ${current}`
-    };
-  }
-  if (cmp < 0) {
-    return {
-      isSequential: false,
-      incrementType: null,
-      expectedVersion: null,
-      message: `Version ${current} is lower than ${previous}`
-    };
-  }
-
-  // Prerelease-only change (e.g., 1.0.0-beta.1 → 1.0.0 or 1.0.0-beta.1 → 1.0.0-beta.2)
+  // No major/minor/patch component increased — prerelease-only change
+  // (e.g., 1.0.0-beta.1 → 1.0.0 or 1.0.0-beta.1 → 1.0.0-beta.2)
   return {
     isSequential: true,
     incrementType: null,

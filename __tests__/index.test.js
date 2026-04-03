@@ -754,6 +754,11 @@ describe('npm Version Check Action - Helper Functions', () => {
   });
 
   describe('isSequentialVersion', () => {
+    beforeEach(() => {
+      mockSemver.compare.mockClear();
+      mockSemver.compare.mockReturnValue(1);
+    });
+
     test('should accept sequential patch bump', () => {
       const { isSequentialVersion } = indexModule;
       const result = isSequentialVersion('1.0.1', '1.0.0');
@@ -865,6 +870,7 @@ describe('npm Version Check Action - Helper Functions', () => {
 
     test('should handle prerelease versions', () => {
       const { isSequentialVersion } = indexModule;
+      mockSemver.compare.mockReturnValue(1);
       const result = isSequentialVersion('1.0.1-beta.1', '1.0.0');
       expect(result.isSequential).toBe(true);
       expect(result.incrementType).toBe('patch');
@@ -872,9 +878,19 @@ describe('npm Version Check Action - Helper Functions', () => {
 
     test('should handle build metadata versions', () => {
       const { isSequentialVersion } = indexModule;
+      mockSemver.compare.mockReturnValue(1);
       const result = isSequentialVersion('1.0.1+build.1', '1.0.0');
       expect(result.isSequential).toBe(true);
       expect(result.incrementType).toBe('patch');
+    });
+
+    test('should correctly reject lower version with higher minor component', () => {
+      const { isSequentialVersion } = indexModule;
+      mockSemver.compare.mockReturnValue(-1);
+      const result = isSequentialVersion('1.10.0', '2.9.0');
+      expect(result.isSequential).toBe(false);
+      expect(result.incrementType).toBeNull();
+      expect(result.message).toContain('lower');
     });
   });
 
