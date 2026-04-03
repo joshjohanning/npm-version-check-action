@@ -72,7 +72,9 @@ const mockSemver = {
     return semverRegex.test(v) ? v : null;
   }),
   parse: jest.fn(v => {
-    const match = typeof v === 'string' ? v.match(/^(\d+)\.(\d+)\.(\d+)/) : null;
+    const validVersion = mockSemver.valid(v);
+    if (!validVersion) return null;
+    const match = validVersion.match(/^(\d+)\.(\d+)\.(\d+)/);
     if (!match) return null;
     return { major: Number(match[1]), minor: Number(match[2]), patch: Number(match[3]) };
   })
@@ -854,9 +856,11 @@ describe('npm Version Check Action - Helper Functions', () => {
 
     test('should handle same version', () => {
       const { isSequentialVersion } = indexModule;
+      mockSemver.compare.mockReturnValue(0);
       const result = isSequentialVersion('1.0.0', '1.0.0');
-      expect(result.isSequential).toBe(true);
-      expect(result.incrementType).toBe('prerelease');
+      expect(result.isSequential).toBe(false);
+      expect(result.incrementType).toBeNull();
+      expect(result.message).toContain('Versions are equal');
     });
 
     test('should handle prerelease versions', () => {

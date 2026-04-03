@@ -1273,11 +1273,29 @@ export function isSequentialVersion(current, previous) {
     };
   }
 
-  // No major/minor/patch component increased — could be a prerelease-only change
-  // (e.g., 1.0.0-beta.1 → 1.0.0-beta.2 or 1.0.0-beta.1 → 1.0.0)
+  // No major/minor/patch component increased — distinguish equal, lower, and prerelease-only changes
+  const cmp = semver.compare(current, previous);
+  if (cmp === 0) {
+    return {
+      isSequential: false,
+      incrementType: null,
+      expectedVersion: null,
+      message: `Versions are equal: ${current}`
+    };
+  }
+  if (cmp < 0) {
+    return {
+      isSequential: false,
+      incrementType: null,
+      expectedVersion: null,
+      message: `Version ${current} is lower than ${previous}`
+    };
+  }
+
+  // Prerelease-only change (e.g., 1.0.0-beta.1 → 1.0.0 or 1.0.0-beta.1 → 1.0.0-beta.2)
   return {
     isSequential: true,
-    incrementType: 'prerelease',
+    incrementType: null,
     expectedVersion: null,
     message: `Prerelease version change: ${previous} → ${current}`
   };
