@@ -70,6 +70,11 @@ const mockSemver = {
   valid: jest.fn(v => {
     const semverRegex = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?(?:\+[0-9A-Za-z-.]+)?$/;
     return semverRegex.test(v) ? v : null;
+  }),
+  parse: jest.fn(v => {
+    const match = typeof v === 'string' ? v.match(/^(\d+)\.(\d+)\.(\d+)/) : null;
+    if (!match) return null;
+    return { major: Number(match[1]), minor: Number(match[2]), patch: Number(match[3]) };
   })
 };
 
@@ -852,6 +857,20 @@ describe('npm Version Check Action - Helper Functions', () => {
       const result = isSequentialVersion('1.0.0', '1.0.0');
       expect(result.isSequential).toBe(false);
       expect(result.incrementType).toBeNull();
+    });
+
+    test('should handle prerelease versions', () => {
+      const { isSequentialVersion } = indexModule;
+      const result = isSequentialVersion('1.0.1-beta.1', '1.0.0');
+      expect(result.isSequential).toBe(true);
+      expect(result.incrementType).toBe('patch');
+    });
+
+    test('should handle build metadata versions', () => {
+      const { isSequentialVersion } = indexModule;
+      const result = isSequentialVersion('1.0.1+build.1', '1.0.0');
+      expect(result.isSequential).toBe(true);
+      expect(result.incrementType).toBe('patch');
     });
   });
 
@@ -3776,11 +3795,14 @@ describe('npm Version Check Action - Integration Tests', () => {
             return 'test-token';
           case 'skip-version-keyword':
             return '[skip version]';
-          case 'fail-on-non-sequential':
-            return 'true';
           default:
             return '';
         }
+      });
+
+      mockCore.getBooleanInput.mockImplementation(input => {
+        if (input === 'fail-on-non-sequential') return true;
+        return false;
       });
 
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '4.2.0' }));
@@ -3807,6 +3829,8 @@ describe('npm Version Check Action - Integration Tests', () => {
       expect(mockCore.notice).toHaveBeenCalledWith(
         expect.stringContaining(`Use 'npm version minor' from version 4.0.0 to get 4.1.0`)
       );
+      // version-changed should NOT be set to true when sequential check fails
+      expect(mockCore.setOutput).not.toHaveBeenCalledWith('version-changed', 'true');
     });
 
     test('should not warn on sequential version increment', async () => {

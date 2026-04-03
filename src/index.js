@@ -1208,15 +1208,15 @@ export function isSequentialVersion(current, previous) {
     return { isSequential: false, incrementType: null, expectedVersion: null, message: 'Invalid version input' };
   }
 
-  const curParts = current.split('.').map(Number);
-  const prevParts = previous.split('.').map(Number);
+  const currentParsed = semver.parse(current);
+  const previousParsed = semver.parse(previous);
 
-  if (curParts.length < 3 || prevParts.length < 3 || curParts.some(isNaN) || prevParts.some(isNaN)) {
+  if (!currentParsed || !previousParsed) {
     return { isSequential: false, incrementType: null, expectedVersion: null, message: 'Invalid version format' };
   }
 
-  const [curMajor, curMinor, curPatch] = curParts;
-  const [prevMajor, prevMinor, prevPatch] = prevParts;
+  const { major: curMajor, minor: curMinor, patch: curPatch } = currentParsed;
+  const { major: prevMajor, minor: prevMinor, patch: prevPatch } = previousParsed;
 
   // Determine which component changed
   if (curMajor > prevMajor) {
@@ -1301,7 +1301,7 @@ export async function run() {
     const skipFilesCheck = core.getInput('skip-files-check') === 'true';
     const skipVersionConsistencyCheck = core.getInput('skip-version-consistency-check') === 'true';
     const skipMajorOnActionsRuntimeChange = core.getInput('skip-major-on-actions-runtime-change') === 'true';
-    const failOnNonSequential = core.getInput('fail-on-non-sequential') === 'true';
+    const failOnNonSequential = core.getBooleanInput('fail-on-non-sequential');
     // Handle skip-version-keyword: empty string explicitly disables, undefined/not-set uses default
     const skipKeywordInput = core.getInput('skip-version-keyword');
     const skipVersionKeyword = skipKeywordInput === '' ? '' : skipKeywordInput || DEFAULT_SKIP_KEYWORD;
@@ -1482,17 +1482,13 @@ export async function run() {
         return;
 
       case 'higher': {
-        logMessage(`✅ Version has been properly incremented from ${latestVersion} to ${currentVersion}`);
-        logMessage('🎯 Semantic versioning check passed!');
-        core.setOutput('version-changed', 'true');
-
-        // Check if the version increment is sequential
+        // Check if the version increment is sequential before declaring success
         const sequentialResult = isSequentialVersion(currentVersion, latestVersion);
         if (sequentialResult.incrementType) {
           core.setOutput('version-increment-type', sequentialResult.incrementType);
         }
         if (!sequentialResult.isSequential && sequentialResult.incrementType) {
-          const msg = `⚠️ Non-sequential version increment: ${sequentialResult.message}. Expected next ${sequentialResult.incrementType} version: ${sequentialResult.expectedVersion}`;
+          const msg = `⚠️ Non-sequential version increment: ${sequentialResult.message}`;
           if (failOnNonSequential) {
             core.setFailed(`❌ ERROR: ${msg}`);
             logMessage(
@@ -1503,6 +1499,10 @@ export async function run() {
           }
           logMessage(msg, 'warning');
         }
+
+        logMessage(`✅ Version has been properly incremented from ${latestVersion} to ${currentVersion}`);
+        logMessage('🎯 Semantic versioning check passed!');
+        core.setOutput('version-changed', 'true');
         break;
       }
     }
