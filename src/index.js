@@ -1193,6 +1193,95 @@ export function compareVersions(current, previous) {
 }
 
 /**
+ * Validate that a version increment is sequential (exactly +1 for the changed component).
+ * From version X.Y.Z, valid sequential increments are:
+ * - X.Y.(Z+1) — patch bump
+ * - X.(Y+1).0 — minor bump
+ * - (X+1).0.0 — major bump
+ *
+ * @param {string} current - The current (new) version string (e.g., '4.2.0')
+ * @param {string} previous - The previous (released) version string (e.g., '4.0.0')
+ * @returns {{ isSequential: boolean, incrementType: string|null, expectedVersion: string|null, message: string }}
+ */
+export function isSequentialVersion(current, previous) {
+  if (!current || !previous || typeof current !== 'string' || typeof previous !== 'string') {
+    return { isSequential: false, incrementType: null, expectedVersion: null, message: 'Invalid version input' };
+  }
+
+  const curParts = current.split('.').map(Number);
+  const prevParts = previous.split('.').map(Number);
+
+  if (curParts.length < 3 || prevParts.length < 3 || curParts.some(isNaN) || prevParts.some(isNaN)) {
+    return { isSequential: false, incrementType: null, expectedVersion: null, message: 'Invalid version format' };
+  }
+
+  const [curMajor, curMinor, curPatch] = curParts;
+  const [prevMajor, prevMinor, prevPatch] = prevParts;
+
+  // Determine which component changed
+  if (curMajor > prevMajor) {
+    const expectedVersion = `${prevMajor + 1}.0.0`;
+    if (curMajor === prevMajor + 1 && curMinor === 0 && curPatch === 0) {
+      return {
+        isSequential: true,
+        incrementType: 'major',
+        expectedVersion,
+        message: `Major version bump: ${previous} → ${current}`
+      };
+    }
+    return {
+      isSequential: false,
+      incrementType: 'major',
+      expectedVersion,
+      message: `Non-sequential major bump: expected ${expectedVersion}, got ${current}`
+    };
+  }
+
+  if (curMinor > prevMinor) {
+    const expectedVersion = `${prevMajor}.${prevMinor + 1}.0`;
+    if (curMinor === prevMinor + 1 && curPatch === 0) {
+      return {
+        isSequential: true,
+        incrementType: 'minor',
+        expectedVersion,
+        message: `Minor version bump: ${previous} → ${current}`
+      };
+    }
+    return {
+      isSequential: false,
+      incrementType: 'minor',
+      expectedVersion,
+      message: `Non-sequential minor bump: expected ${expectedVersion}, got ${current}`
+    };
+  }
+
+  if (curPatch > prevPatch) {
+    const expectedVersion = `${prevMajor}.${prevMinor}.${prevPatch + 1}`;
+    if (curPatch === prevPatch + 1) {
+      return {
+        isSequential: true,
+        incrementType: 'patch',
+        expectedVersion,
+        message: `Patch version bump: ${previous} → ${current}`
+      };
+    }
+    return {
+      isSequential: false,
+      incrementType: 'patch',
+      expectedVersion,
+      message: `Non-sequential patch bump: expected ${expectedVersion}, got ${current}`
+    };
+  }
+
+  return {
+    isSequential: false,
+    incrementType: null,
+    expectedVersion: null,
+    message: 'Version is not higher than previous'
+  };
+}
+
+/**
  * Main action logic
  */
 /**
@@ -1212,6 +1301,7 @@ export async function run() {
     const skipFilesCheck = core.getInput('skip-files-check') === 'true';
     const skipVersionConsistencyCheck = core.getInput('skip-version-consistency-check') === 'true';
     const skipMajorOnActionsRuntimeChange = core.getInput('skip-major-on-actions-runtime-change') === 'true';
+    const failOnNonSequential = core.getInput('fail-on-non-sequential') === 'true';
     // Handle skip-version-keyword: empty string explicitly disables, undefined/not-set uses default
     const skipKeywordInput = core.getInput('skip-version-keyword');
     const skipVersionKeyword = skipKeywordInput === '' ? '' : skipKeywordInput || DEFAULT_SKIP_KEYWORD;
@@ -1222,6 +1312,7 @@ export async function run() {
     logMessage(`Skip files check: ${skipFilesCheck}`);
     logMessage(`Skip version consistency check: ${skipVersionConsistencyCheck}`);
     logMessage(`Skip major on actions runtime change: ${skipMajorOnActionsRuntimeChange}`);
+    logMessage(`Fail on non-sequential version: ${failOnNonSequential}`);
     if (skipVersionKeyword) {
       logMessage(`Skip version keyword: ${skipVersionKeyword}`);
     }
@@ -1239,6 +1330,7 @@ export async function run() {
     core.setOutput('current-version', '');
     core.setOutput('previous-version', '');
     core.setOutput('runtime-changed', 'false');
+    core.setOutput('version-increment-type', '');
 
     // Check if we should run based on file changes
     if (!skipFilesCheck) {
@@ -1389,11 +1481,30 @@ export async function run() {
         );
         return;
 
-      case 'higher':
+      case 'higher': {
         logMessage(`✅ Version has been properly incremented from ${latestVersion} to ${currentVersion}`);
         logMessage('🎯 Semantic versioning check passed!');
         core.setOutput('version-changed', 'true');
+
+        // Check if the version increment is sequential
+        const sequentialResult = isSequentialVersion(currentVersion, latestVersion);
+        if (sequentialResult.incrementType) {
+          core.setOutput('version-increment-type', sequentialResult.incrementType);
+        }
+        if (!sequentialResult.isSequential && sequentialResult.incrementType) {
+          const msg = `⚠️ Non-sequential version increment: ${sequentialResult.message}. Expected next ${sequentialResult.incrementType} version: ${sequentialResult.expectedVersion}`;
+          if (failOnNonSequential) {
+            core.setFailed(`❌ ERROR: ${msg}`);
+            logMessage(
+              `💡 HINT: Use 'npm version ${sequentialResult.incrementType}' from version ${latestVersion} to get ${sequentialResult.expectedVersion}`,
+              'notice'
+            );
+            return;
+          }
+          logMessage(msg, 'warning');
+        }
         break;
+      }
     }
 
     // Check if action.yml node runtime changed and require major version bump

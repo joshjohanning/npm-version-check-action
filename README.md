@@ -136,16 +136,18 @@ jobs:
 | `skip-version-keyword`                 | Keyword in commit messages to skip version check for that commit's files. Set to `''` to disable        | No       | `[skip version]`      |
 | `skip-version-consistency-check`       | Skip the check that validates package.json and package-lock.json have matching versions                 | No       | `false`               |
 | `skip-major-on-actions-runtime-change` | Skip the check that requires a major version bump when `action.yml` changes its Node.js Actions runtime | No       | `false`               |
+| `fail-on-non-sequential`               | Fail when version increment skips levels (e.g., 4.0.0 → 4.2.0 instead of 4.1.0). Default only warns     | No       | `false`               |
 | `token`                                | GitHub token for API access. Used for fetching repository tags and commit analysis                      | No       | `${{ github.token }}` |
 
 ## 📤 Outputs
 
-| Output             | Description                                                                        |
-| ------------------ | ---------------------------------------------------------------------------------- |
-| `version-changed`  | Whether the version was changed (`true`/`false`)                                   |
-| `current-version`  | Current version from package.json                                                  |
-| `previous-version` | Previous version from latest git tag                                               |
-| `runtime-changed`  | Whether the Node.js Actions runtime version in action.yml changed (`true`/`false`) |
+| Output                   | Description                                                                        |
+| ------------------------ | ---------------------------------------------------------------------------------- |
+| `version-changed`        | Whether the version was changed (`true`/`false`)                                   |
+| `current-version`        | Current version from package.json                                                  |
+| `previous-version`       | Previous version from latest git tag                                               |
+| `runtime-changed`        | Whether the Node.js Actions runtime version in action.yml changed (`true`/`false`) |
+| `version-increment-type` | The type of version increment detected: `major`, `minor`, or `patch`               |
 
 ### Using Outputs
 
@@ -159,6 +161,7 @@ jobs:
     echo "Version changed: ${{ steps.version-check.outputs.version-changed }}"
     echo "Current version: ${{ steps.version-check.outputs.current-version }}"
     echo "Previous version: ${{ steps.version-check.outputs.previous-version }}"
+    echo "Increment type: ${{ steps.version-check.outputs.version-increment-type }}"
 ```
 
 ## 🎯 How It Works
@@ -175,8 +178,9 @@ jobs:
 4. **Version Extraction**: Reads the current version from `package.json`
 5. **Tag Comparison**: Fetches the latest git tag and compares versions
 6. **Semantic Validation**: Ensures the new version is higher than the previous release
-7. **Runtime Change Detection**: Checks if `action.yml` changed its Node.js Actions runtime and requires a major version bump
-8. **Clear Feedback**: Provides success or error messages with actionable hints
+7. **Sequential Version Check**: Validates that the version increment is exactly +1 for the changed component (warns or fails on skipped versions)
+8. **Runtime Change Detection**: Checks if `action.yml` changed its Node.js Actions runtime and requires a major version bump
+9. **Clear Feedback**: Provides success or error messages with actionable hints
 
 ### Smart File Detection
 

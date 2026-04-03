@@ -746,6 +746,115 @@ describe('npm Version Check Action - Helper Functions', () => {
     });
   });
 
+  describe('isSequentialVersion', () => {
+    test('should accept sequential patch bump', () => {
+      const { isSequentialVersion } = indexModule;
+      const result = isSequentialVersion('1.0.1', '1.0.0');
+      expect(result.isSequential).toBe(true);
+      expect(result.incrementType).toBe('patch');
+      expect(result.expectedVersion).toBe('1.0.1');
+    });
+
+    test('should accept sequential minor bump', () => {
+      const { isSequentialVersion } = indexModule;
+      const result = isSequentialVersion('1.1.0', '1.0.0');
+      expect(result.isSequential).toBe(true);
+      expect(result.incrementType).toBe('minor');
+      expect(result.expectedVersion).toBe('1.1.0');
+    });
+
+    test('should accept sequential major bump', () => {
+      const { isSequentialVersion } = indexModule;
+      const result = isSequentialVersion('2.0.0', '1.0.0');
+      expect(result.isSequential).toBe(true);
+      expect(result.incrementType).toBe('major');
+      expect(result.expectedVersion).toBe('2.0.0');
+    });
+
+    test('should reject skipped patch version', () => {
+      const { isSequentialVersion } = indexModule;
+      const result = isSequentialVersion('1.0.3', '1.0.1');
+      expect(result.isSequential).toBe(false);
+      expect(result.incrementType).toBe('patch');
+      expect(result.expectedVersion).toBe('1.0.2');
+    });
+
+    test('should reject skipped minor version', () => {
+      const { isSequentialVersion } = indexModule;
+      const result = isSequentialVersion('4.2.0', '4.0.0');
+      expect(result.isSequential).toBe(false);
+      expect(result.incrementType).toBe('minor');
+      expect(result.expectedVersion).toBe('4.1.0');
+    });
+
+    test('should reject skipped major version', () => {
+      const { isSequentialVersion } = indexModule;
+      const result = isSequentialVersion('6.0.0', '4.0.0');
+      expect(result.isSequential).toBe(false);
+      expect(result.incrementType).toBe('major');
+      expect(result.expectedVersion).toBe('5.0.0');
+    });
+
+    test('should reject major bump with non-zero minor', () => {
+      const { isSequentialVersion } = indexModule;
+      const result = isSequentialVersion('5.1.0', '4.0.0');
+      expect(result.isSequential).toBe(false);
+      expect(result.incrementType).toBe('major');
+      expect(result.expectedVersion).toBe('5.0.0');
+    });
+
+    test('should reject major bump with non-zero patch', () => {
+      const { isSequentialVersion } = indexModule;
+      const result = isSequentialVersion('5.0.1', '4.0.0');
+      expect(result.isSequential).toBe(false);
+      expect(result.incrementType).toBe('major');
+      expect(result.expectedVersion).toBe('5.0.0');
+    });
+
+    test('should reject minor bump with non-zero patch', () => {
+      const { isSequentialVersion } = indexModule;
+      const result = isSequentialVersion('4.1.1', '4.0.0');
+      expect(result.isSequential).toBe(false);
+      expect(result.incrementType).toBe('minor');
+      expect(result.expectedVersion).toBe('4.1.0');
+    });
+
+    test('should handle sequential bump from non-zero patch', () => {
+      const { isSequentialVersion } = indexModule;
+      const result = isSequentialVersion('1.2.4', '1.2.3');
+      expect(result.isSequential).toBe(true);
+      expect(result.incrementType).toBe('patch');
+    });
+
+    test('should handle sequential minor bump from non-zero patch', () => {
+      const { isSequentialVersion } = indexModule;
+      const result = isSequentialVersion('1.3.0', '1.2.3');
+      expect(result.isSequential).toBe(true);
+      expect(result.incrementType).toBe('minor');
+    });
+
+    test('should handle invalid version input', () => {
+      const { isSequentialVersion } = indexModule;
+      expect(isSequentialVersion(null, '1.0.0').isSequential).toBe(false);
+      expect(isSequentialVersion('1.0.0', null).isSequential).toBe(false);
+      expect(isSequentialVersion('', '1.0.0').isSequential).toBe(false);
+      expect(isSequentialVersion(123, '1.0.0').isSequential).toBe(false);
+    });
+
+    test('should handle invalid version format', () => {
+      const { isSequentialVersion } = indexModule;
+      expect(isSequentialVersion('abc', '1.0.0').isSequential).toBe(false);
+      expect(isSequentialVersion('1.0', '1.0.0').isSequential).toBe(false);
+    });
+
+    test('should handle same version', () => {
+      const { isSequentialVersion } = indexModule;
+      const result = isSequentialVersion('1.0.0', '1.0.0');
+      expect(result.isSequential).toBe(false);
+      expect(result.incrementType).toBeNull();
+    });
+  });
+
   describe('readPackageJson', () => {
     let mockFs;
 
@@ -3618,6 +3727,113 @@ describe('npm Version Check Action - Integration Tests', () => {
       expect(mockCore.info).toHaveBeenCalledWith('✅ Version has been properly incremented from 1.0.0 to 1.1.0');
       expect(mockCore.info).toHaveBeenCalledWith('🎯 Semantic versioning check passed!');
       expect(mockCore.setOutput).toHaveBeenCalledWith('version-changed', 'true');
+      expect(mockCore.setOutput).toHaveBeenCalledWith('version-increment-type', 'minor');
+      expect(mockCore.info).toHaveBeenCalledWith('🏁 Version check completed successfully');
+    });
+
+    test('should warn on non-sequential version increment by default', async () => {
+      const { run } = indexModule;
+
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '4.2.0' }));
+
+      mockOctokit.paginate.mockImplementation(async method => {
+        if (method === mockOctokit.rest.repos.listTags) {
+          return [{ name: 'v4.0.0' }];
+        }
+        return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add feature' } }];
+      });
+
+      mockOctokit.rest.repos.getCommit.mockResolvedValue({
+        data: { files: [{ filename: 'src/index.js' }] }
+      });
+
+      mockExec.exec.mockResolvedValue(0);
+      mockSemver.compare.mockReturnValue(1);
+
+      await run();
+
+      expect(mockCore.setOutput).toHaveBeenCalledWith('version-changed', 'true');
+      expect(mockCore.setOutput).toHaveBeenCalledWith('version-increment-type', 'minor');
+      expect(mockCore.warning).toHaveBeenCalledWith(
+        expect.stringContaining('Non-sequential minor bump: expected 4.1.0, got 4.2.0')
+      );
+      expect(mockCore.setFailed).not.toHaveBeenCalled();
+      expect(mockCore.info).toHaveBeenCalledWith('🏁 Version check completed successfully');
+    });
+
+    test('should fail on non-sequential version increment when fail-on-non-sequential is true', async () => {
+      const { run } = indexModule;
+
+      mockCore.getInput.mockImplementation(input => {
+        switch (input) {
+          case 'package-path':
+            return 'package.json';
+          case 'tag-prefix':
+            return 'v';
+          case 'skip-files-check':
+            return 'false';
+          case 'token':
+            return 'test-token';
+          case 'skip-version-keyword':
+            return '[skip version]';
+          case 'fail-on-non-sequential':
+            return 'true';
+          default:
+            return '';
+        }
+      });
+
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '4.2.0' }));
+
+      mockOctokit.paginate.mockImplementation(async method => {
+        if (method === mockOctokit.rest.repos.listTags) {
+          return [{ name: 'v4.0.0' }];
+        }
+        return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add feature' } }];
+      });
+
+      mockOctokit.rest.repos.getCommit.mockResolvedValue({
+        data: { files: [{ filename: 'src/index.js' }] }
+      });
+
+      mockExec.exec.mockResolvedValue(0);
+      mockSemver.compare.mockReturnValue(1);
+
+      await run();
+
+      expect(mockCore.setFailed).toHaveBeenCalledWith(
+        expect.stringContaining('Non-sequential minor bump: expected 4.1.0, got 4.2.0')
+      );
+      expect(mockCore.notice).toHaveBeenCalledWith(
+        expect.stringContaining(`Use 'npm version minor' from version 4.0.0 to get 4.1.0`)
+      );
+    });
+
+    test('should not warn on sequential version increment', async () => {
+      const { run } = indexModule;
+
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '4.0.1' }));
+
+      mockOctokit.paginate.mockImplementation(async method => {
+        if (method === mockOctokit.rest.repos.listTags) {
+          return [{ name: 'v4.0.0' }];
+        }
+        return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Fix bug' } }];
+      });
+
+      mockOctokit.rest.repos.getCommit.mockResolvedValue({
+        data: { files: [{ filename: 'src/index.js' }] }
+      });
+
+      mockExec.exec.mockResolvedValue(0);
+      mockSemver.compare.mockReturnValue(1);
+
+      await run();
+
+      expect(mockCore.setOutput).toHaveBeenCalledWith('version-changed', 'true');
+      expect(mockCore.setOutput).toHaveBeenCalledWith('version-increment-type', 'patch');
+      expect(mockCore.warning).not.toHaveBeenCalled();
+      expect(mockCore.setFailed).not.toHaveBeenCalled();
       expect(mockCore.info).toHaveBeenCalledWith('🏁 Version check completed successfully');
     });
 
