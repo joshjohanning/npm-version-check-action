@@ -68,8 +68,7 @@ const mockGithub = {
 const mockSemver = {
   compare: jest.fn(),
   valid: jest.fn(v => {
-    const semverRegex =
-      /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?(?:\+[0-9A-Za-z-.]+)?$/;
+    const semverRegex = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?(?:\+[0-9A-Za-z-.]+)?$/;
     return semverRegex.test(v) ? v : null;
   })
 };

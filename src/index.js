@@ -1169,9 +1169,7 @@ export async function getLatestVersionTag(tagPrefix, token) {
     }
 
     // Sort tags by version and get the latest
-    const sortedEntries = versionEntries.sort((a, b) =>
-      semver.compare(a.version, b.version)
-    );
+    const sortedEntries = versionEntries.sort((a, b) => semver.compare(a.version, b.version));
 
     return sortedEntries[sortedEntries.length - 1].tag;
   } catch (error) {
