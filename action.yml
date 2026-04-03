@@ -34,6 +34,10 @@ inputs:
     description: 'Skip the check that requires a major version bump when action.yml changes its Node.js Actions runtime version (runs.using). Default (false) enforces major bumps for runtime changes since they are breaking changes for action consumers.'
     required: false
     default: 'false'
+  skip-sequential-version-check:
+    description: 'Skip the check that validates version increments are sequential (e.g., 4.0.0 to 4.1.0 not 4.2.0). Default (false) enforces sequential increments.'
+    required: false
+    default: 'false'
   token:
     description: 'GitHub token for API access. Used for fetching repository tags and commit analysis.'
     required: false
@@ -48,6 +52,8 @@ outputs:
     description: 'Previous version from latest git tag'
   runtime-changed:
     description: 'Whether the Node.js Actions runtime version in action.yml was changed'
+  version-increment-type:
+    description: 'The type of version increment detected: major, minor, or patch (empty when no numeric bump type is detected, e.g., first release or prerelease-only changes)'
 
 runs:
   using: 'node24'
