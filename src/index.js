@@ -6,8 +6,8 @@ import * as path from 'path';
 import semver from 'semver';
 
 // Shared constants for validation
-const SAFE_GIT_COMMANDS = ['diff', 'fetch', 'tag', 'show'];
-const SAFE_GIT_OPTIONS = ['-l', '--name-only', '--tags', '--'];
+const SAFE_GIT_COMMANDS = ['diff', 'show'];
+const SAFE_GIT_OPTIONS = ['--name-only', '--'];
 
 // Default skip keyword for bypassing version check on specific commits
 const DEFAULT_SKIP_KEYWORD = '[skip version]';
@@ -1122,39 +1122,58 @@ export function validatePackageVersionConsistency(packagePath) {
 }
 
 /**
- * Retrieves the latest version tag from git that matches the specified prefix.
+ * Retrieves the latest version tag from the repository using the GitHub API.
+ *
+ * Uses `octokit.paginate(octokit.rest.repos.listTags)` to fetch all tags via the
+ * GitHub REST API, eliminating the need for `git fetch --tags` and local git credentials.
+ * This enables `persist-credentials: false` on `actions/checkout` for improved security.
  *
  * @param {string} tagPrefix - The prefix to filter version tags (e.g., 'v' for tags like 'v1.2.3').
+ * @param {string} token - GitHub token for API authentication.
  * @returns {Promise<string|null>} The latest version tag matching the prefix, or null if none found.
- * @throws {Error} If fetching or parsing git tags fails.
+ * @throws {Error} If fetching or parsing tags fails.
  */
-export async function getLatestVersionTag(tagPrefix) {
+export async function getLatestVersionTag(tagPrefix, token) {
   try {
-    // Fetch all tags
-    await execGit(['fetch', '--tags']);
+    if (!token) {
+      throw new Error('GitHub token is required for fetching repository tags. Ensure the token input is configured.');
+    }
 
-    // Get all tags and filter by prefix
-    const tagsOutput = await execGit(['tag', '-l']);
-    const tags = tagsOutput ? tagsOutput.split('\n').filter(tag => tag.trim()) : [];
+    const octokit = github.getOctokit(token);
+    const { owner, repo } = github.context.repo;
 
-    // Filter tags that match the version pattern
-    const versionPattern = new RegExp(`^${tagPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[0-9]+\\.[0-9]+\\.[0-9]+`);
-    const versionTags = tags.filter(tag => versionPattern.test(tag));
+    // Fetch all tags via GitHub API with pagination
+    const tags = await octokit.paginate(octokit.rest.repos.listTags, {
+      owner,
+      repo,
+      per_page: 100
+    });
 
-    if (versionTags.length === 0) {
+    const tagNames = tags.map(tag => tag.name);
+
+    // Build a list of tags with valid semver versions after the prefix
+    const versionEntries = tagNames
+      .filter(name => name.startsWith(tagPrefix))
+      .map(name => {
+        const version = name.substring(tagPrefix.length);
+        const validVersion = semver.valid(version);
+        if (!validVersion) {
+          return null;
+        }
+        return { tag: name, version: validVersion };
+      })
+      .filter(entry => entry !== null);
+
+    if (versionEntries.length === 0) {
       return null;
     }
 
     // Sort tags by version and get the latest
-    const sortedTags = versionTags.sort((a, b) => {
-      const versionA = a.replace(tagPrefix, '');
-      const versionB = b.replace(tagPrefix, '');
-      return semver.compare(versionA, versionB);
-    });
+    const sortedEntries = versionEntries.sort((a, b) => semver.compare(a.version, b.version));
 
-    return sortedTags[sortedTags.length - 1];
+    return sortedEntries[sortedEntries.length - 1].tag;
   } catch (error) {
-    throw new Error(`Failed to fetch git tags: ${error.message}`);
+    throw new Error(`Failed to fetch repository tags: ${error.message}`);
   }
 }
 
@@ -1170,26 +1189,6 @@ export function compareVersions(current, previous) {
     return 'lower';
   } else {
     return 'same';
-  }
-}
-
-/**
- * Fetch git tags to ensure they're available in shallow clones.
- *
- * Runs 'git fetch --tags' to retrieve all tags from the remote repository.
- * Logs the process and handles errors by issuing a warning instead of throwing.
- * This function is designed to be non-blocking and will not fail the action if git tags cannot be fetched.
- *
- * @returns {Promise<void>} Resolves when tags have been fetched or a warning has been logged.
- */
-export async function fetchTags() {
-  try {
-    logMessage('🏷️ Fetching git tags...');
-    await execGit(['fetch', '--tags']);
-    logMessage('✅ Git tags fetched successfully');
-  } catch (error) {
-    core.warning(`Could not fetch git tags: ${error.message}. Some version comparisons may be limited.`);
-    logMessage(`⚠️ Warning: Could not fetch git tags: ${error.message}`, 'warning');
   }
 }
 
@@ -1234,9 +1233,6 @@ export async function run() {
       );
       return;
     }
-
-    // Fetch git tags to ensure they're available for version comparison
-    await fetchTags();
 
     // Initialize outputs
     core.setOutput('version-changed', 'false');
@@ -1352,9 +1348,9 @@ export async function run() {
     logMessage(`📦 Current version: ${currentVersion}`);
     core.setOutput('current-version', currentVersion);
 
-    // Get latest tag
-    logMessage('🏷️ Fetching git tags...');
-    const latestTag = await getLatestVersionTag(tagPrefix);
+    // Get latest tag via GitHub API
+    logMessage('🏷️ Fetching repository tags...');
+    const latestTag = await getLatestVersionTag(tagPrefix, token);
 
     if (!latestTag) {
       logMessage('🎉 No previous version tag found, this appears to be the first release.', 'notice');
