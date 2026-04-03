@@ -136,7 +136,7 @@ jobs:
 | `skip-version-keyword`                 | Keyword in commit messages to skip version check for that commit's files. Set to `''` to disable        | No       | `[skip version]`      |
 | `skip-version-consistency-check`       | Skip the check that validates package.json and package-lock.json have matching versions                 | No       | `false`               |
 | `skip-major-on-actions-runtime-change` | Skip the check that requires a major version bump when `action.yml` changes its Node.js Actions runtime | No       | `false`               |
-| `fail-on-non-sequential`               | Fail when version increment skips levels (e.g., 4.0.0 → 4.2.0 instead of 4.1.0). Default only warns     | No       | `false`               |
+| `skip-sequential-version-check`        | Skip the check that validates version increments are sequential (e.g., 4.0.0 to 4.1.0 not 4.2.0)        | No       | `false`               |
 | `token`                                | GitHub token for API access. Used for fetching repository tags and commit analysis                      | No       | `${{ github.token }}` |
 
 ## 📤 Outputs
@@ -178,7 +178,7 @@ jobs:
 4. **Version Extraction**: Reads the current version from `package.json`
 5. **Tag Comparison**: Fetches the latest git tag and compares versions
 6. **Semantic Validation**: Ensures the new version is higher than the previous release
-7. **Sequential Version Check**: Validates that the version increment is exactly +1 for the changed component (warns or fails on skipped versions)
+7. **Sequential Version Check**: Validates that the version increment is exactly +1 for the changed component (fails on skipped versions unless skipped)
 8. **Runtime Change Detection**: Checks if `action.yml` changed its Node.js Actions runtime and requires a major version bump
 9. **Clear Feedback**: Provides success or error messages with actionable hints
 

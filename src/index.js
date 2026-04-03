@@ -1322,7 +1322,7 @@ export async function run() {
     const skipFilesCheck = core.getInput('skip-files-check') === 'true';
     const skipVersionConsistencyCheck = core.getInput('skip-version-consistency-check') === 'true';
     const skipMajorOnActionsRuntimeChange = core.getInput('skip-major-on-actions-runtime-change') === 'true';
-    const failOnNonSequential = core.getBooleanInput('fail-on-non-sequential');
+    const skipSequentialVersionCheck = core.getInput('skip-sequential-version-check') === 'true';
     // Handle skip-version-keyword: empty string explicitly disables, undefined/not-set uses default
     const skipKeywordInput = core.getInput('skip-version-keyword');
     const skipVersionKeyword = skipKeywordInput === '' ? '' : skipKeywordInput || DEFAULT_SKIP_KEYWORD;
@@ -1333,7 +1333,7 @@ export async function run() {
     logMessage(`Skip files check: ${skipFilesCheck}`);
     logMessage(`Skip version consistency check: ${skipVersionConsistencyCheck}`);
     logMessage(`Skip major on actions runtime change: ${skipMajorOnActionsRuntimeChange}`);
-    logMessage(`Fail on non-sequential version: ${failOnNonSequential}`);
+    logMessage(`Skip sequential version check: ${skipSequentialVersionCheck}`);
     if (skipVersionKeyword) {
       logMessage(`Skip version keyword: ${skipVersionKeyword}`);
     }
@@ -1508,17 +1508,13 @@ export async function run() {
         if (sequentialResult.incrementType) {
           core.setOutput('version-increment-type', sequentialResult.incrementType);
         }
-        if (!sequentialResult.isSequential && sequentialResult.incrementType) {
-          const msg = `⚠️ ${sequentialResult.message}`;
-          if (failOnNonSequential) {
-            core.setFailed(`❌ ERROR: ${msg}`);
-            logMessage(
-              `💡 HINT: Use 'npm version ${sequentialResult.incrementType}' from version ${latestVersion} to get ${sequentialResult.expectedVersion}`,
-              'notice'
-            );
-            return;
-          }
-          logMessage(msg, 'warning');
+        if (!sequentialResult.isSequential && sequentialResult.incrementType && !skipSequentialVersionCheck) {
+          core.setFailed(`❌ ERROR: ${sequentialResult.message}`);
+          logMessage(
+            `💡 HINT: Use 'npm version ${sequentialResult.incrementType}' from version ${latestVersion} to get ${sequentialResult.expectedVersion}`,
+            'notice'
+          );
+          return;
         }
 
         logMessage(`✅ Version has been properly incremented from ${latestVersion} to ${currentVersion}`);

@@ -3770,8 +3770,59 @@ describe('npm Version Check Action - Integration Tests', () => {
       expect(mockCore.info).toHaveBeenCalledWith('🏁 Version check completed successfully');
     });
 
-    test('should warn on non-sequential version increment by default', async () => {
+    test('should fail on non-sequential version increment by default', async () => {
       const { run } = indexModule;
+
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '4.2.0' }));
+
+      mockOctokit.paginate.mockImplementation(async method => {
+        if (method === mockOctokit.rest.repos.listTags) {
+          return [{ name: 'v4.0.0' }];
+        }
+        return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add feature' } }];
+      });
+
+      mockOctokit.rest.repos.getCommit.mockResolvedValue({
+        data: { files: [{ filename: 'src/index.js' }] }
+      });
+
+      mockExec.exec.mockResolvedValue(0);
+      mockSemver.compare.mockReturnValue(1);
+
+      await run();
+
+      expect(mockCore.setOutput).toHaveBeenCalledWith('version-increment-type', 'minor');
+      expect(mockCore.setFailed).toHaveBeenCalledWith(
+        expect.stringContaining('Non-sequential minor bump: expected 4.1.0, got 4.2.0')
+      );
+      expect(mockCore.notice).toHaveBeenCalledWith(
+        expect.stringContaining(`Use 'npm version minor' from version 4.0.0 to get 4.1.0`)
+      );
+      // version-changed should NOT be set to true when sequential check fails
+      expect(mockCore.setOutput).not.toHaveBeenCalledWith('version-changed', 'true');
+    });
+
+    test('should skip sequential version check when skip-sequential-version-check is true', async () => {
+      const { run } = indexModule;
+
+      mockCore.getInput.mockImplementation(input => {
+        switch (input) {
+          case 'package-path':
+            return 'package.json';
+          case 'tag-prefix':
+            return 'v';
+          case 'skip-files-check':
+            return 'false';
+          case 'token':
+            return 'test-token';
+          case 'skip-version-keyword':
+            return '[skip version]';
+          case 'skip-sequential-version-check':
+            return 'true';
+          default:
+            return '';
+        }
+      });
 
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '4.2.0' }));
 
@@ -3793,64 +3844,8 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       expect(mockCore.setOutput).toHaveBeenCalledWith('version-changed', 'true');
       expect(mockCore.setOutput).toHaveBeenCalledWith('version-increment-type', 'minor');
-      expect(mockCore.warning).toHaveBeenCalledWith(
-        expect.stringContaining('Non-sequential minor bump: expected 4.1.0, got 4.2.0')
-      );
       expect(mockCore.setFailed).not.toHaveBeenCalled();
       expect(mockCore.info).toHaveBeenCalledWith('🏁 Version check completed successfully');
-    });
-
-    test('should fail on non-sequential version increment when fail-on-non-sequential is true', async () => {
-      const { run } = indexModule;
-
-      mockCore.getInput.mockImplementation(input => {
-        switch (input) {
-          case 'package-path':
-            return 'package.json';
-          case 'tag-prefix':
-            return 'v';
-          case 'skip-files-check':
-            return 'false';
-          case 'token':
-            return 'test-token';
-          case 'skip-version-keyword':
-            return '[skip version]';
-          default:
-            return '';
-        }
-      });
-
-      mockCore.getBooleanInput.mockImplementation(input => {
-        if (input === 'fail-on-non-sequential') return true;
-        return false;
-      });
-
-      mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '4.2.0' }));
-
-      mockOctokit.paginate.mockImplementation(async method => {
-        if (method === mockOctokit.rest.repos.listTags) {
-          return [{ name: 'v4.0.0' }];
-        }
-        return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add feature' } }];
-      });
-
-      mockOctokit.rest.repos.getCommit.mockResolvedValue({
-        data: { files: [{ filename: 'src/index.js' }] }
-      });
-
-      mockExec.exec.mockResolvedValue(0);
-      mockSemver.compare.mockReturnValue(1);
-
-      await run();
-
-      expect(mockCore.setFailed).toHaveBeenCalledWith(
-        expect.stringContaining('Non-sequential minor bump: expected 4.1.0, got 4.2.0')
-      );
-      expect(mockCore.notice).toHaveBeenCalledWith(
-        expect.stringContaining(`Use 'npm version minor' from version 4.0.0 to get 4.1.0`)
-      );
-      // version-changed should NOT be set to true when sequential check fails
-      expect(mockCore.setOutput).not.toHaveBeenCalledWith('version-changed', 'true');
     });
 
     test('should not warn on sequential version increment', async () => {
