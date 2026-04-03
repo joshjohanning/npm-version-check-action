@@ -141,13 +141,13 @@ jobs:
 
 ## 📤 Outputs
 
-| Output                   | Description                                                                        |
-| ------------------------ | ---------------------------------------------------------------------------------- |
-| `version-changed`        | Whether the version was changed (`true`/`false`)                                   |
-| `current-version`        | Current version from package.json                                                  |
-| `previous-version`       | Previous version from latest git tag                                               |
-| `runtime-changed`        | Whether the Node.js Actions runtime version in action.yml changed (`true`/`false`) |
-| `version-increment-type` | The type of version increment detected: `major`, `minor`, or `patch`               |
+| Output                   | Description                                                                                      |
+| ------------------------ | ------------------------------------------------------------------------------------------------ |
+| `version-changed`        | Whether the version was changed (`true`/`false`)                                                 |
+| `current-version`        | Current version from package.json                                                                |
+| `previous-version`       | Previous version from latest git tag                                                             |
+| `runtime-changed`        | Whether the Node.js Actions runtime version in action.yml changed (`true`/`false`)               |
+| `version-increment-type` | The type of version increment detected: `major`, `minor`, or `patch` (empty when not applicable) |
 
 ### Using Outputs
 
@@ -178,7 +178,7 @@ jobs:
 4. **Version Extraction**: Reads the current version from `package.json`
 5. **Tag Comparison**: Fetches the latest git tag and compares versions
 6. **Semantic Validation**: Ensures the new version is higher than the previous release
-7. **Sequential Version Check**: Validates that the version increment is exactly +1 for the changed component (fails on skipped versions unless skipped)
+7. **Sequential Version Check**: Validates that the version increment is exactly +1 for the changed component (e.g., `4.0.0 → 4.1.0` is valid, `4.0.0 → 4.2.0` is not). Disable with `skip-sequential-version-check: true`
 8. **Runtime Change Detection**: Checks if `action.yml` changed its Node.js Actions runtime and requires a major version bump
 9. **Clear Feedback**: Provides success or error messages with actionable hints
 

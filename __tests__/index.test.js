@@ -884,6 +884,32 @@ describe('npm Version Check Action - Helper Functions', () => {
       expect(result.incrementType).toBe('patch');
     });
 
+    test('should handle prerelease-only bump (same numeric components)', () => {
+      const { isSequentialVersion } = indexModule;
+      mockSemver.compare.mockReturnValue(1);
+      const result = isSequentialVersion('1.0.0-beta.2', '1.0.0-beta.1');
+      expect(result.isSequential).toBe(true);
+      expect(result.incrementType).toBeNull();
+    });
+
+    test('should handle downgrade between prereleases', () => {
+      const { isSequentialVersion } = indexModule;
+      mockSemver.compare.mockReturnValue(-1);
+      const result = isSequentialVersion('1.0.0-beta.1', '1.0.0-beta.2');
+      expect(result.isSequential).toBe(false);
+      expect(result.incrementType).toBeNull();
+      expect(result.message).toContain('lower');
+    });
+
+    test('should handle stable to prerelease transition', () => {
+      const { isSequentialVersion } = indexModule;
+      mockSemver.compare.mockReturnValue(-1);
+      const result = isSequentialVersion('1.0.0-beta.1', '1.0.0');
+      expect(result.isSequential).toBe(false);
+      expect(result.incrementType).toBeNull();
+      expect(result.message).toContain('lower');
+    });
+
     test('should correctly reject lower version with higher minor component', () => {
       const { isSequentialVersion } = indexModule;
       mockSemver.compare.mockReturnValue(-1);
@@ -3805,23 +3831,9 @@ describe('npm Version Check Action - Integration Tests', () => {
     test('should skip sequential version check when skip-sequential-version-check is true', async () => {
       const { run } = indexModule;
 
-      mockCore.getInput.mockImplementation(input => {
-        switch (input) {
-          case 'package-path':
-            return 'package.json';
-          case 'tag-prefix':
-            return 'v';
-          case 'skip-files-check':
-            return 'false';
-          case 'token':
-            return 'test-token';
-          case 'skip-version-keyword':
-            return '[skip version]';
-          case 'skip-sequential-version-check':
-            return 'true';
-          default:
-            return '';
-        }
+      mockCore.getBooleanInput.mockImplementation(input => {
+        if (input === 'skip-sequential-version-check') return true;
+        return false;
       });
 
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '4.2.0' }));

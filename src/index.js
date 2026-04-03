@@ -1322,7 +1322,7 @@ export async function run() {
     const skipFilesCheck = core.getInput('skip-files-check') === 'true';
     const skipVersionConsistencyCheck = core.getInput('skip-version-consistency-check') === 'true';
     const skipMajorOnActionsRuntimeChange = core.getInput('skip-major-on-actions-runtime-change') === 'true';
-    const skipSequentialVersionCheck = core.getInput('skip-sequential-version-check') === 'true';
+    const skipSequentialVersionCheck = core.getBooleanInput('skip-sequential-version-check');
     // Handle skip-version-keyword: empty string explicitly disables, undefined/not-set uses default
     const skipKeywordInput = core.getInput('skip-version-keyword');
     const skipVersionKeyword = skipKeywordInput === '' ? '' : skipKeywordInput || DEFAULT_SKIP_KEYWORD;
