@@ -1273,11 +1273,13 @@ export function isSequentialVersion(current, previous) {
     };
   }
 
+  // No major/minor/patch component increased — could be a prerelease-only change
+  // (e.g., 1.0.0-beta.1 → 1.0.0-beta.2 or 1.0.0-beta.1 → 1.0.0)
   return {
-    isSequential: false,
-    incrementType: null,
+    isSequential: true,
+    incrementType: 'prerelease',
     expectedVersion: null,
-    message: 'Version is not higher than previous'
+    message: `Prerelease version change: ${previous} → ${current}`
   };
 }
 
@@ -1488,7 +1490,7 @@ export async function run() {
           core.setOutput('version-increment-type', sequentialResult.incrementType);
         }
         if (!sequentialResult.isSequential && sequentialResult.incrementType) {
-          const msg = `⚠️ Non-sequential version increment: ${sequentialResult.message}`;
+          const msg = `⚠️ ${sequentialResult.message}`;
           if (failOnNonSequential) {
             core.setFailed(`❌ ERROR: ${msg}`);
             logMessage(

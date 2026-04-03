@@ -855,8 +855,8 @@ describe('npm Version Check Action - Helper Functions', () => {
     test('should handle same version', () => {
       const { isSequentialVersion } = indexModule;
       const result = isSequentialVersion('1.0.0', '1.0.0');
-      expect(result.isSequential).toBe(false);
-      expect(result.incrementType).toBeNull();
+      expect(result.isSequential).toBe(true);
+      expect(result.incrementType).toBe('prerelease');
     });
 
     test('should handle prerelease versions', () => {
