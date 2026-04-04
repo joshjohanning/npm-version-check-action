@@ -1,16 +1,9 @@
 import * as core from '@actions/core';
-import * as exec from '@actions/exec';
 import * as github from '@actions/github';
 import * as fs from 'fs';
 import * as path from 'path';
 import semver from 'semver';
 
-// Shared constants for validation
-const SAFE_GIT_COMMANDS = ['diff', 'show'];
-const SAFE_GIT_OPTIONS = ['--name-only', '--'];
-
-// Default skip keyword for bypassing version check on specific commits
-const DEFAULT_SKIP_KEYWORD = '[skip version]';
 const SHA_PATTERN = /^[a-f0-9]{7,40}$/i;
 // Pattern to detect shell metacharacters and other dangerous characters for command injection prevention
 const SHELL_INJECTION_CHARS = /[;&|`$()'"<>]/;
@@ -68,81 +61,6 @@ export function logMessage(message, level = 'info') {
 }
 
 /**
- * Execute a git command and return the output
- */
-export async function execGit(args) {
-  let output = '';
-  let error = '';
-
-  const options = {
-    listeners: {
-      stdout: data => {
-        output += data.toString();
-      },
-      stderr: data => {
-        error += data.toString();
-      }
-    },
-    silent: true
-  };
-
-  try {
-    // Comprehensive validation and sanitization for GHAS compliance
-    // Ensure args array is not empty before processing
-    if (!args || args.length === 0) {
-      throw new Error('Git command arguments cannot be empty');
-    }
-
-    // This ensures GHAS sees explicit validation before exec
-    const sanitizedArgs = args.map((arg, index) => {
-      if (typeof arg !== 'string') {
-        throw new Error('All git arguments must be strings');
-      }
-
-      // First argument must be a whitelisted git command
-      if (index === 0 && !SAFE_GIT_COMMANDS.includes(arg)) {
-        throw new Error(`Unsupported git command: ${arg}`);
-      }
-
-      // Allow known safe options
-      if (SAFE_GIT_OPTIONS.includes(arg)) {
-        return arg;
-      }
-
-      // Allow SHA hashes (for baseRef/headRef) - inline validation for GHAS
-      if (SHA_PATTERN.test(arg)) {
-        return arg;
-      }
-
-      // Reject dangerous git options that could execute commands
-      if (arg.includes('--upload-pack') || arg.includes('--receive-pack') || arg.includes('--exec')) {
-        throw new Error(`Dangerous git option detected: ${arg}`);
-      }
-
-      // Reject any argument that contains shell metacharacters
-      if (SHELL_INJECTION_CHARS.test(arg)) {
-        throw new Error(`Argument contains shell metacharacters: ${arg}`);
-      }
-
-      // Reject any other options that start with dash (not in whitelist)
-      if (arg.startsWith('-')) {
-        throw new Error(`Potentially dangerous git option: ${arg}`);
-      }
-
-      return arg; // Return the clean argument
-    });
-
-    await exec.exec('git', sanitizedArgs, options);
-    return output.trim();
-  } catch (err) {
-    if (error) {
-      throw new Error(`Git command failed: ${error}`);
-    }
-    throw err;
-  }
-}
-
-/**
  * Sanitize and validate SHA values to prevent command injection
  *
  * This function ensures that SHA values used in git commands are safe by:
@@ -185,68 +103,6 @@ export function sanitizeSHA(sha, refName) {
   }
 
   return cleanSha;
-}
-
-/**
- * Sanitize file path for use in git commands
- * @param {string} filePath - The file path to sanitize
- * @param {string} pathName - Name of the path parameter for error messages
- * @returns {string} Sanitized file path
- * @throws {Error} If file path is invalid or contains dangerous characters
- */
-export function sanitizeFilePath(filePath, pathName) {
-  if (!filePath || typeof filePath !== 'string') {
-    throw new Error(`Invalid ${pathName}: must be a non-empty string`);
-  }
-
-  const cleanPath = filePath.trim();
-
-  // Check for shell metacharacters that could be used for command injection
-  if (SHELL_INJECTION_CHARS.test(cleanPath)) {
-    throw new Error(`Invalid ${pathName}: contains dangerous characters`);
-  }
-
-  // Check for path traversal attempts
-  if (cleanPath.includes('..')) {
-    throw new Error(`Invalid ${pathName}: path traversal not allowed`);
-  }
-
-  // Check for absolute paths (git show expects relative paths)
-  if (cleanPath.startsWith('/')) {
-    throw new Error(`Invalid ${pathName}: absolute paths not allowed`);
-  }
-
-  // Ensure path doesn't start with dangerous prefixes
-  if (cleanPath.startsWith('-')) {
-    throw new Error(`Invalid ${pathName}: paths starting with '-' not allowed`);
-  }
-
-  return cleanPath;
-}
-
-/**
- * Get files changed in the current PR
- */
-export async function getChangedFiles() {
-  const context = github.context;
-
-  if (context.eventName !== 'pull_request') {
-    return [];
-  }
-
-  const baseRef = context.payload.pull_request?.base?.sha;
-  const headRef = context.sha;
-
-  if (!baseRef || !headRef) {
-    throw new Error('Could not determine base and head refs for PR');
-  }
-
-  // Sanitize SHA values to prevent command injection
-  const sanitizedBaseRef = sanitizeSHA(baseRef, 'baseRef');
-  const sanitizedHeadRef = sanitizeSHA(headRef, 'headRef');
-
-  const output = await execGit(['diff', '--name-only', sanitizedBaseRef, sanitizedHeadRef]);
-  return output ? output.split('\n') : [];
 }
 
 /**
@@ -321,53 +177,86 @@ export async function getFilesForCommit(sha, octokit, owner, repo) {
 }
 
 /**
- * Get files changed in the PR, excluding files from commits that contain the skip keyword
+ * Get the PR diff files using the pulls.listFiles API (base...head comparison).
+ * This is the source of truth for which files have a net change in the PR.
+ * @param {object} octokit - The authenticated Octokit instance
+ * @param {string} owner - Repository owner
+ * @param {string} repo - Repository name
+ * @param {number} prNumber - Pull request number
+ * @returns {Promise<string[]>} Array of file paths with net changes in the PR
+ */
+export async function getPRDiffFiles(octokit, owner, repo, prNumber) {
+  const files = await octokit.paginate(octokit.rest.pulls.listFiles, {
+    owner,
+    repo,
+    pull_number: prNumber,
+    per_page: 100
+  });
+
+  return files.map(f => f.filename);
+}
+
+/**
+ * Apply skip-keyword filtering to PR diff files. Only call this when the PR
+ * diff contains files that would actually trigger a version check — this avoids
+ * unnecessary commit API calls when the PR has no relevant changes.
+ * @param {string[]} prDiffFiles - Files from the PR diff
  * @param {string} skipKeyword - The keyword to look for in commit messages
  * @param {string} token - GitHub token for API access
+ * @param {object} octokit - The authenticated Octokit instance
+ * @param {string} owner - Repository owner
+ * @param {string} repo - Repository name
  * @returns {Promise<{files: string[], skippedCommits: number, totalCommits: number}>}
  */
-export async function getChangedFilesWithSkipSupport(skipKeyword, token) {
-  const context = github.context;
-  const octokit = github.getOctokit(token);
-  const owner = context.repo.owner;
-  const repo = context.repo.repo;
-
+export async function applySkipKeywordFilter(prDiffFiles, skipKeyword, token, octokit, owner, repo) {
   const commits = await getCommitsWithMessages(token);
 
   if (commits.length === 0) {
-    return { files: [], skippedCommits: 0, totalCommits: 0 };
+    return { files: prDiffFiles, skippedCommits: 0, totalCommits: 0 };
   }
 
-  const filesFromNonSkippedCommits = new Set();
-  let skippedCommits = 0;
-
   // Separate commits into skipped and non-skipped
-  const nonSkippedCommits = [];
+  let skippedCommits = 0;
+  const skippedCommitList = [];
   for (const commit of commits) {
-    const shouldSkip = skipKeyword && commit.message.toLowerCase().includes(skipKeyword.toLowerCase());
-
-    if (shouldSkip) {
+    if (commit.message.toLowerCase().includes(skipKeyword.toLowerCase())) {
       skippedCommits++;
+      skippedCommitList.push(commit);
       logMessage(`⏭️ Skipping commit ${commit.sha.substring(0, 7)}: "${commit.message}"`, 'debug');
-    } else {
-      nonSkippedCommits.push(commit);
     }
   }
 
-  // Fetch files for all non-skipped commits in parallel
+  // If no commits were skipped, the PR diff is the final answer
+  if (skippedCommits === 0) {
+    return { files: prDiffFiles, skippedCommits: 0, totalCommits: commits.length };
+  }
+
+  // If ALL commits were skipped, no files to check
+  if (skippedCommits === commits.length) {
+    return { files: [], skippedCommits, totalCommits: commits.length };
+  }
+
+  // Some commits were skipped — we need per-commit file analysis to determine
+  // which PR diff files should be excluded. A file is kept only if it appears
+  // in at least one non-skipped commit.
+  const nonSkippedCommits = commits.filter(c => !skippedCommitList.includes(c));
+
   const fileResults = await Promise.all(
     nonSkippedCommits.map(commit => getFilesForCommit(commit.sha, octokit, owner, repo))
   );
 
-  // Collect all unique files
+  const filesFromNonSkippedCommits = new Set();
   for (const files of fileResults) {
     for (const f of files) {
       filesFromNonSkippedCommits.add(f);
     }
   }
 
+  // Keep only PR diff files that also appear in a non-skipped commit
+  const filtered = prDiffFiles.filter(f => filesFromNonSkippedCommits.has(f));
+
   return {
-    files: [...filesFromNonSkippedCommits],
+    files: filtered,
     skippedCommits,
     totalCommits: commits.length
   };
@@ -431,18 +320,28 @@ export function isRelevantFile(file) {
 }
 
 /**
- * Get file content at a specific git ref
+ * Get file content at a specific git ref using the GitHub API
  * @param {string} filePath - The file path to retrieve
  * @param {string} ref - The git reference (SHA, branch, etc.)
+ * @param {object} octokit - The authenticated Octokit instance
+ * @param {string} owner - Repository owner
+ * @param {string} repo - Repository name
  * @returns {Promise<string|null>} The file content or null if not found
  */
-async function getFileAtRef(filePath, ref) {
+async function getFileAtRef(filePath, ref, octokit, owner, repo) {
   try {
-    // Sanitize both parameters to prevent command injection
-    const sanitizedRef = sanitizeSHA(ref, 'ref');
-    const sanitizedFilePath = sanitizeFilePath(filePath, 'filePath');
-    const output = await execGit(['show', `${sanitizedRef}:${sanitizedFilePath}`]);
-    return output && output.trim() ? output.trim() : null;
+    const { data } = await octokit.rest.repos.getContent({
+      owner,
+      repo,
+      path: filePath,
+      ref
+    });
+
+    if (data.type !== 'file' || !data.content) {
+      return null;
+    }
+
+    return Buffer.from(data.content, 'base64').toString('utf8');
   } catch {
     // File doesn't exist at this ref or other error
     return null;
@@ -663,9 +562,12 @@ function getTransitiveDeps(lockPackages, startKeys) {
  * @param {string[]|null} changedFiles - Optional list of changed files to filter which package files to check.
  *                                        If provided, only checks package files present in this list.
  *                                        If null/undefined, checks all package files that differ between base and head.
+ * @param {object} octokit - The authenticated Octokit instance
+ * @param {string} owner - Repository owner
+ * @param {string} repo - Repository name
  * @returns {Promise<{hasChanges: boolean, onlyDevDependencies: boolean}>} Object indicating if there are changes and if they're dev-only
  */
-export async function hasPackageDependencyChanges(changedFiles = null) {
+export async function hasPackageDependencyChanges(changedFiles = null, octokit = null, owner = null, repo = null) {
   try {
     const context = github.context;
     if (context.eventName !== 'pull_request') {
@@ -679,8 +581,9 @@ export async function hasPackageDependencyChanges(changedFiles = null) {
       return { hasChanges: false, onlyDevDependencies: false };
     }
 
-    const sanitizedBaseRef = sanitizeSHA(baseRef, 'baseRef');
-    const sanitizedHeadRef = sanitizeSHA(headRef, 'headRef');
+    if (!octokit || !owner || !repo) {
+      return { hasChanges: false, onlyDevDependencies: false };
+    }
 
     // Determine which package files to check based on changedFiles filter
     const shouldCheckPackageJson =
@@ -703,8 +606,8 @@ export async function hasPackageDependencyChanges(changedFiles = null) {
 
     // Check package.json for dependency changes using proper JSON parsing
     if (shouldCheckPackageJson) {
-      const basePackageJsonRaw = await getFileAtRef(PACKAGE_JSON_FILENAME, sanitizedBaseRef);
-      const headPackageJsonRaw = await getFileAtRef(PACKAGE_JSON_FILENAME, sanitizedHeadRef);
+      const basePackageJsonRaw = await getFileAtRef(PACKAGE_JSON_FILENAME, baseRef, octokit, owner, repo);
+      const headPackageJsonRaw = await getFileAtRef(PACKAGE_JSON_FILENAME, headRef, octokit, owner, repo);
 
       if (basePackageJsonRaw && headPackageJsonRaw) {
         try {
@@ -772,8 +675,8 @@ export async function hasPackageDependencyChanges(changedFiles = null) {
 
     // Check package-lock.json for actual dependency changes
     if (shouldCheckPackageLock) {
-      const basePackageLockRaw = await getFileAtRef(PACKAGE_LOCK_JSON_FILENAME, sanitizedBaseRef);
-      const headPackageLockRaw = await getFileAtRef(PACKAGE_LOCK_JSON_FILENAME, sanitizedHeadRef);
+      const basePackageLockRaw = await getFileAtRef(PACKAGE_LOCK_JSON_FILENAME, baseRef, octokit, owner, repo);
+      const headPackageLockRaw = await getFileAtRef(PACKAGE_LOCK_JSON_FILENAME, headRef, octokit, owner, repo);
 
       if (basePackageLockRaw && headPackageLockRaw) {
         try {
@@ -972,17 +875,17 @@ export function parseNodeRuntime(content) {
  * @param {string} baseRef - The base git ref (SHA)
  * @param {string} headRef - The head git ref (SHA)
  * @param {string} actionYmlPath - Path to the action.yml file
+ * @param {object} octokit - The authenticated Octokit instance
+ * @param {string} owner - Repository owner
+ * @param {string} repo - Repository name
  * @returns {Promise<{changed: boolean, baseVersion: number|null, headVersion: number|null}>}
  */
-export async function detectNodeRuntimeChange(baseRef, headRef, actionYmlPath) {
+export async function detectNodeRuntimeChange(baseRef, headRef, actionYmlPath, octokit, owner, repo) {
   const result = { changed: false, baseVersion: null, headVersion: null };
 
   try {
-    const sanitizedBaseRef = sanitizeSHA(baseRef, 'baseRef');
-    const sanitizedHeadRef = sanitizeSHA(headRef, 'headRef');
-
-    const baseContent = await getFileAtRef(actionYmlPath, sanitizedBaseRef);
-    const headContent = await getFileAtRef(actionYmlPath, sanitizedHeadRef);
+    const baseContent = await getFileAtRef(actionYmlPath, baseRef, octokit, owner, repo);
+    const headContent = await getFileAtRef(actionYmlPath, headRef, octokit, owner, repo);
 
     if (!baseContent || !headContent) {
       // action.yml doesn't exist at one or both refs - skip check
@@ -1323,9 +1226,7 @@ export async function run() {
     const skipVersionConsistencyCheck = core.getInput('skip-version-consistency-check') === 'true';
     const skipMajorOnActionsRuntimeChange = core.getInput('skip-major-on-actions-runtime-change') === 'true';
     const skipSequentialVersionCheck = core.getBooleanInput('skip-sequential-version-check');
-    // Handle skip-version-keyword: empty string explicitly disables, undefined/not-set uses default
-    const skipKeywordInput = core.getInput('skip-version-keyword');
-    const skipVersionKeyword = skipKeywordInput === '' ? '' : skipKeywordInput || DEFAULT_SKIP_KEYWORD;
+    const skipVersionKeyword = core.getInput('skip-version-keyword');
     const token = core.getInput('token') || process.env.GITHUB_TOKEN;
 
     logMessage(`Package path: ${packagePath}`);
@@ -1346,6 +1247,18 @@ export async function run() {
       return;
     }
 
+    // Token is required for GitHub API calls (PR diff, tags, commits)
+    if (!token) {
+      core.setFailed(
+        '❌ ERROR: GitHub token is required. Ensure the token input is configured or GITHUB_TOKEN is available.'
+      );
+      return;
+    }
+
+    // Initialize GitHub API client
+    const octokit = github.getOctokit(token);
+    const { owner: repoOwner, repo: repoName } = github.context.repo;
+
     // Initialize outputs
     core.setOutput('version-changed', 'false');
     core.setOutput('current-version', '');
@@ -1357,47 +1270,17 @@ export async function run() {
     if (!skipFilesCheck) {
       logMessage('📁 Checking files changed in PR...');
 
-      // Get changed files, respecting skip-version-keyword in commit messages
-      let changedFiles;
-      if (skipVersionKeyword && token) {
-        logMessage(`🔍 Analyzing commits for skip keyword: "${skipVersionKeyword}"`);
-        const result = await getChangedFilesWithSkipSupport(skipVersionKeyword, token);
-        logMessage(`📋 Found ${result.totalCommits} commits in PR`);
-        // If no commits were found (API error fallback), use regular getChangedFiles
-        if (result.totalCommits === 0) {
-          logMessage('ℹ️ Could not analyze individual commits, using standard file diff');
-          changedFiles = await getChangedFiles();
-        } else {
-          changedFiles = result.files;
-          if (result.skippedCommits > 0) {
-            logMessage(
-              `⏭️ Skipped ${result.skippedCommits} of ${result.totalCommits} commits containing "${skipVersionKeyword}"`,
-              'notice'
-            );
-          } else {
-            logMessage(`ℹ️ No commits contained skip keyword, all ${result.totalCommits} commits included`);
-          }
-        }
-      } else {
-        if (skipVersionKeyword && !token) {
-          logMessage(
-            '⚠️ skip-version-keyword requires a token input for API access, using standard file diff',
-            'warning'
-          );
-        }
-        changedFiles = await getChangedFiles();
-      }
+      // Get the PR diff (one API call — source of truth)
+      const prNumber = github.context.payload.pull_request?.number;
+      let changedFiles = prNumber ? await getPRDiffFiles(octokit, repoOwner, repoName, prNumber) : [];
       logMessage(`Files changed: ${changedFiles.join(', ')}`);
 
-      // Check for regular relevant file changes (JS/TS files, package-lock.json)
+      // Check if the PR diff has any files that would trigger a version check
       const hasRegularChanges = hasRelevantFileChanges(changedFiles);
-
-      // Check specifically for package dependency changes (package.json and package-lock.json)
-      const packageDepResult = await hasPackageDependencyChanges(changedFiles);
+      const packageDepResult = await hasPackageDependencyChanges(changedFiles, octokit, repoOwner, repoName);
       const hasPackageDepChanges = packageDepResult.hasChanges;
       const onlyDevDependencies = packageDepResult.onlyDevDependencies;
 
-      // Check if action.yml has an actual runtime change (not just metadata edits)
       let hasRuntimeChange = false;
       if (!skipMajorOnActionsRuntimeChange) {
         const actionYmlChanged = changedFiles.some(
@@ -1407,13 +1290,63 @@ export async function run() {
           const baseRef = github.context.payload.pull_request?.base?.sha;
           const headRef = github.context.sha;
           if (baseRef && headRef) {
-            const earlyRuntimeCheck = await detectNodeRuntimeChange(baseRef, headRef, DEFAULT_ACTION_YML_PATH);
+            const earlyRuntimeCheck = await detectNodeRuntimeChange(
+              baseRef,
+              headRef,
+              DEFAULT_ACTION_YML_PATH,
+              octokit,
+              repoOwner,
+              repoName
+            );
             hasRuntimeChange = earlyRuntimeCheck.changed;
           }
         }
       }
 
-      if (!hasRegularChanges && !hasPackageDepChanges && !hasRuntimeChange) {
+      const wouldTriggerVersionCheck = hasRegularChanges || hasPackageDepChanges || hasRuntimeChange;
+
+      // Stage 2: Only do commit analysis if the PR has relevant changes AND
+      // skip keyword is set — otherwise there's nothing to skip
+      if (wouldTriggerVersionCheck && skipVersionKeyword) {
+        const result = await applySkipKeywordFilter(
+          changedFiles,
+          skipVersionKeyword,
+          token,
+          octokit,
+          repoOwner,
+          repoName
+        );
+        changedFiles = result.files;
+        if (result.skippedCommits > 0) {
+          logMessage(
+            `⏭️ Skipped ${result.skippedCommits} of ${result.totalCommits} commits containing "${skipVersionKeyword}"`,
+            'notice'
+          );
+
+          // Re-evaluate relevance after filtering
+          const filteredHasRegularChanges = hasRelevantFileChanges(changedFiles);
+          const filteredPackageDepResult = await hasPackageDependencyChanges(
+            changedFiles,
+            octokit,
+            repoOwner,
+            repoName
+          );
+
+          if (!filteredHasRegularChanges && !filteredPackageDepResult.hasChanges && !hasRuntimeChange) {
+            if (filteredPackageDepResult.onlyDevDependencies) {
+              logMessage('⏭️ Only devDependency changes detected, skipping version check', 'notice');
+            } else {
+              logMessage(
+                '⏭️ No JavaScript/TypeScript files or dependency changes detected, skipping version check',
+                'notice'
+              );
+            }
+            return;
+          }
+        }
+      }
+
+      if (!wouldTriggerVersionCheck) {
         if (onlyDevDependencies) {
           logMessage('⏭️ Only devDependency changes detected, skipping version check', 'notice');
         } else {
@@ -1530,7 +1463,14 @@ export async function run() {
       const headRef = github.context.sha;
 
       if (baseRef && headRef) {
-        const runtimeChange = await detectNodeRuntimeChange(baseRef, headRef, DEFAULT_ACTION_YML_PATH);
+        const runtimeChange = await detectNodeRuntimeChange(
+          baseRef,
+          headRef,
+          DEFAULT_ACTION_YML_PATH,
+          octokit,
+          repoOwner,
+          repoName
+        );
 
         if (runtimeChange.changed) {
           logMessage(

@@ -39,8 +39,8 @@ inputs:
     required: false
     default: 'false'
   token:
-    description: 'GitHub token for API access. Used for fetching repository tags and commit analysis.'
-    required: false
+    description: 'GitHub token for API access (required). Used for fetching PR diff, repository tags, and commit analysis.'
+    required: true
     default: ${{ github.token }}
 
 outputs:
