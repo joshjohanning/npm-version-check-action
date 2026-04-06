@@ -24,11 +24,6 @@ const mockCore = {
   notice: jest.fn()
 };
 
-// Mock @actions/exec
-const mockExec = {
-  exec: jest.fn()
-};
-
 // Mock Octokit methods
 const mockOctokit = {
   rest: {
@@ -89,7 +84,6 @@ jest.unstable_mockModule('fs', () => ({
 }));
 
 jest.unstable_mockModule('@actions/core', () => mockCore);
-jest.unstable_mockModule('@actions/exec', () => mockExec);
 jest.unstable_mockModule('@actions/github', () => mockGithub);
 jest.unstable_mockModule('semver', () => ({ default: mockSemver }));
 
@@ -2926,7 +2920,7 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       const result = await getLatestVersionTag('v', 'fake-token');
       expect(result).toBe('v1.1.0');
-      expect(mockGithub.getOctokit).toHaveBeenCalledWith('fake-token');
+      expect(mockGithub.getOctokit).toHaveBeenCalledWith('fake-token', { baseUrl: 'https://api.github.com' });
       expect(mockOctokit.paginate).toHaveBeenCalledWith(mockOctokit.rest.repos.listTags, {
         owner: 'test-owner',
         repo: 'test-repo',

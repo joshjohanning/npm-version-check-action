@@ -42,6 +42,10 @@ inputs:
     description: 'GitHub token for API access (required). Used for fetching PR diff, repository tags, and commit analysis.'
     required: true
     default: ${{ github.token }}
+  github-api-url:
+    description: 'GitHub API base URL. Override for GHES/GHEC-DR compatibility.'
+    required: false
+    default: ${{ github.api_url }}
 
 outputs:
   version-changed:

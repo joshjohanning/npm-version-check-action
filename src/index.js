@@ -130,7 +130,8 @@ export async function getCommitsWithMessages(token) {
   }
 
   try {
-    const octokit = github.getOctokit(token);
+    const apiUrl = core.getInput('github-api-url') || process.env.GITHUB_API_URL || 'https://api.github.com';
+    const octokit = github.getOctokit(token, { baseUrl: apiUrl });
     // Use pagination to handle PRs with more than 100 commits
     const commits = await octokit.paginate(octokit.rest.pulls.listCommits, {
       owner: context.repo.owner,
@@ -215,13 +216,13 @@ export async function applySkipKeywordFilter(prDiffFiles, skipKeyword, token, oc
     return { files: prDiffFiles, skippedCommits: 0, totalCommits: 0 };
   }
 
-  // Separate commits into skipped and non-skipped
+  // Use a Set of skipped SHAs for O(1) lookups
   let skippedCommits = 0;
-  const skippedCommitList = [];
+  const skippedSHAs = new Set();
   for (const commit of commits) {
     if (commit.message.toLowerCase().includes(skipKeyword.toLowerCase())) {
       skippedCommits++;
-      skippedCommitList.push(commit);
+      skippedSHAs.add(commit.sha);
       logMessage(`⏭️ Skipping commit ${commit.sha.substring(0, 7)}: "${commit.message}"`, 'debug');
     }
   }
@@ -239,7 +240,7 @@ export async function applySkipKeywordFilter(prDiffFiles, skipKeyword, token, oc
   // Some commits were skipped — we need per-commit file analysis to determine
   // which PR diff files should be excluded. A file is kept only if it appears
   // in at least one non-skipped commit.
-  const nonSkippedCommits = commits.filter(c => !skippedCommitList.includes(c));
+  const nonSkippedCommits = commits.filter(c => !skippedSHAs.has(c.sha));
 
   const fileResults = await Promise.all(
     nonSkippedCommits.map(commit => getFilesForCommit(commit.sha, octokit, owner, repo))
@@ -1042,7 +1043,8 @@ export async function getLatestVersionTag(tagPrefix, token) {
       throw new Error('GitHub token is required for fetching repository tags. Ensure the token input is configured.');
     }
 
-    const octokit = github.getOctokit(token);
+    const apiUrl = core.getInput('github-api-url') || process.env.GITHUB_API_URL || 'https://api.github.com';
+    const octokit = github.getOctokit(token, { baseUrl: apiUrl });
     const { owner, repo } = github.context.repo;
 
     // Fetch all tags via GitHub API with pagination
@@ -1256,7 +1258,8 @@ export async function run() {
     }
 
     // Initialize GitHub API client
-    const octokit = github.getOctokit(token);
+    const apiUrl = core.getInput('github-api-url') || process.env.GITHUB_API_URL || 'https://api.github.com';
+    const octokit = github.getOctokit(token, { baseUrl: apiUrl });
     const { owner: repoOwner, repo: repoName } = github.context.repo;
 
     // Initialize outputs
