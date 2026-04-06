@@ -588,7 +588,7 @@ export async function hasPackageDependencyChanges(changedFiles = null, octokit =
     }
 
     const baseRef = context.payload.pull_request?.base?.sha;
-    const headRef = context.sha;
+    const headRef = context.payload.pull_request?.head?.sha || context.sha;
 
     if (!baseRef || !headRef) {
       return { hasChanges: false, onlyDevDependencies: false };
@@ -1304,7 +1304,7 @@ export async function run() {
         );
         if (actionYmlChanged) {
           const baseRef = github.context.payload.pull_request?.base?.sha;
-          const headRef = github.context.sha;
+          const headRef = github.context.payload.pull_request?.head?.sha || github.context.sha;
           if (baseRef && headRef) {
             const earlyRuntimeCheck = await detectNodeRuntimeChange(
               baseRef,
@@ -1485,7 +1485,7 @@ export async function run() {
     // Check if action.yml node runtime changed and require major version bump
     if (!skipMajorOnActionsRuntimeChange) {
       const baseRef = github.context.payload.pull_request?.base?.sha;
-      const headRef = github.context.sha;
+      const headRef = github.context.payload.pull_request?.head?.sha || github.context.sha;
 
       if (baseRef && headRef) {
         const runtimeChange = await detectNodeRuntimeChange(
