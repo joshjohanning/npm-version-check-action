@@ -367,10 +367,6 @@ Ensure your `package.json` has a valid `version` field:
 }
 ```
 
-### "Failed to fetch repository tags"
-
-The action uses the GitHub API to fetch tags. If this error appears, check that the `token` input has `contents: read` permission and the token is valid.
-
 ### Node.js Actions Runtime Change Detection
 
 When `skip-major-on-actions-runtime-change` is `false` (default), the action compares the `runs.using` field in `action.yml` between the base and head of the PR. If the Node.js Actions runtime version changes (e.g., `node20` to `node24`), a **major** version bump is required.
