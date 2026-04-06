@@ -1519,7 +1519,7 @@ describe('hasPackageDependencyChanges', () => {
     expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false });
   });
 
-  test('should sanitize SHA values properly', async () => {
+  test('should pass SHA refs to repos.getContent API', async () => {
     const { hasPackageDependencyChanges } = indexModule;
 
     const mockPackageJson = { name: 'test', version: '1.0.0' };
@@ -1533,7 +1533,7 @@ describe('hasPackageDependencyChanges', () => {
     });
 
     await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
-    // Verify that the repos.getContent API is called with sanitized SHA values
+    // Verify that the repos.getContent API is called with the correct refs
     expect(mockOctokit.rest.repos.getContent).toHaveBeenCalledWith(
       expect.objectContaining({ path: 'package.json', ref: TEST_BASE_SHA })
     );
@@ -4354,6 +4354,36 @@ describe('npm Version Check Action - Integration Tests', () => {
       expect(mockCore.setFailed).toHaveBeenCalledWith(
         'Action failed with error: Failed to fetch repository tags: API request failed'
       );
+    });
+
+    test('should fail early when no token is provided', async () => {
+      const { run } = indexModule;
+
+      mockCore.getInput.mockImplementation(input => {
+        switch (input) {
+          case 'package-path':
+            return 'package.json';
+          case 'token':
+            return '';
+          default:
+            return '';
+        }
+      });
+
+      // Clear GITHUB_TOKEN env var
+      const originalToken = process.env.GITHUB_TOKEN;
+      delete process.env.GITHUB_TOKEN;
+
+      await run();
+
+      expect(mockCore.setFailed).toHaveBeenCalledWith(
+        '❌ ERROR: GitHub token is required. Ensure the token input is configured or GITHUB_TOKEN is available.'
+      );
+
+      // Restore env
+      if (originalToken) {
+        process.env.GITHUB_TOKEN = originalToken;
+      }
     });
 
     test('should skip commit analysis when skip-version-keyword is empty string', async () => {

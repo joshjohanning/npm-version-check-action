@@ -595,7 +595,8 @@ export async function hasPackageDependencyChanges(changedFiles = null, octokit =
     }
 
     if (!octokit || !owner || !repo) {
-      return { hasChanges: false, onlyDevDependencies: false };
+      logMessage('⚠️ Missing API client for package dependency check, assuming changes exist', 'warning');
+      return { hasChanges: true, onlyDevDependencies: false };
     }
 
     // Determine which package files to check based on changedFiles filter
