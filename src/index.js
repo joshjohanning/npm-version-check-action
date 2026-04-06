@@ -210,6 +210,11 @@ export async function getPRDiffFiles(octokit, owner, repo, prNumber) {
  * @returns {Promise<{files: string[], skippedCommits: number, totalCommits: number}>}
  */
 export async function applySkipKeywordFilter(prDiffFiles, skipKeyword, token, octokit, owner, repo) {
+  // Guard against empty keyword — every string includes '', which would skip all commits
+  if (!skipKeyword || !skipKeyword.trim()) {
+    return { files: prDiffFiles, skippedCommits: 0, totalCommits: 0 };
+  }
+
   const commits = await getCommitsWithMessages(token);
 
   if (commits.length === 0) {
@@ -242,14 +247,16 @@ export async function applySkipKeywordFilter(prDiffFiles, skipKeyword, token, oc
   // in at least one non-skipped commit.
   const nonSkippedCommits = commits.filter(c => !skippedSHAs.has(c.sha));
 
-  const fileResults = await Promise.all(
-    nonSkippedCommits.map(commit => getFilesForCommit(commit.sha, octokit, owner, repo))
-  );
-
+  // Fetch files for non-skipped commits with bounded concurrency
+  const BATCH_SIZE = 10;
   const filesFromNonSkippedCommits = new Set();
-  for (const files of fileResults) {
-    for (const f of files) {
-      filesFromNonSkippedCommits.add(f);
+  for (let i = 0; i < nonSkippedCommits.length; i += BATCH_SIZE) {
+    const batch = nonSkippedCommits.slice(i, i + BATCH_SIZE);
+    const fileResults = await Promise.all(batch.map(commit => getFilesForCommit(commit.sha, octokit, owner, repo)));
+    for (const files of fileResults) {
+      for (const f of files) {
+        filesFromNonSkippedCommits.add(f);
+      }
     }
   }
 
@@ -343,9 +350,14 @@ async function getFileAtRef(filePath, ref, octokit, owner, repo) {
     }
 
     return Buffer.from(data.content, 'base64').toString('utf8');
-  } catch {
-    // File doesn't exist at this ref or other error
-    return null;
+  } catch (error) {
+    // File doesn't exist at this ref — return null
+    if (error.status === 404) {
+      return null;
+    }
+    // Other errors (rate limit, permissions, etc.) — rethrow so callers
+    // can conservatively treat the change as relevant
+    throw error;
   }
 }
 
@@ -1335,7 +1347,16 @@ export async function run() {
             repoName
           );
 
-          if (!filteredHasRegularChanges && !filteredPackageDepResult.hasChanges && !hasRuntimeChange) {
+          // Recompute runtime change — action.yml may have been filtered out
+          let filteredHasRuntimeChange = false;
+          if (hasRuntimeChange) {
+            const actionYmlStillChanged = changedFiles.some(
+              f => f === DEFAULT_ACTION_YML_PATH || f.endsWith(`/${DEFAULT_ACTION_YML_PATH}`)
+            );
+            filteredHasRuntimeChange = actionYmlStillChanged;
+          }
+
+          if (!filteredHasRegularChanges && !filteredPackageDepResult.hasChanges && !filteredHasRuntimeChange) {
             if (filteredPackageDepResult.onlyDevDependencies) {
               logMessage('⏭️ Only devDependency changes detected, skipping version check', 'notice');
             } else {

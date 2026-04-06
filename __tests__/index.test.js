@@ -100,7 +100,7 @@ function createGetContentMock(basePackageJson, headPackageJson, basePackageLock,
           data: { type: 'file', content: Buffer.from(JSON.stringify(basePackageJson)).toString('base64') }
         });
       }
-      return Promise.reject(new Error('Not Found'));
+      return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
     }
     if (path === 'package.json' && ref === TEST_HEAD_SHA) {
       if (headPackageJson) {
@@ -108,7 +108,7 @@ function createGetContentMock(basePackageJson, headPackageJson, basePackageLock,
           data: { type: 'file', content: Buffer.from(JSON.stringify(headPackageJson)).toString('base64') }
         });
       }
-      return Promise.reject(new Error('Not Found'));
+      return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
     }
     // Handle package-lock.json file retrieval
     if (path === 'package-lock.json' && ref === TEST_BASE_SHA) {
@@ -117,7 +117,7 @@ function createGetContentMock(basePackageJson, headPackageJson, basePackageLock,
           data: { type: 'file', content: Buffer.from(JSON.stringify(basePackageLock)).toString('base64') }
         });
       }
-      return Promise.reject(new Error('Not Found'));
+      return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
     }
     if (path === 'package-lock.json' && ref === TEST_HEAD_SHA) {
       if (headPackageLock) {
@@ -125,10 +125,10 @@ function createGetContentMock(basePackageJson, headPackageJson, basePackageLock,
           data: { type: 'file', content: Buffer.from(JSON.stringify(headPackageLock)).toString('base64') }
         });
       }
-      return Promise.reject(new Error('Not Found'));
+      return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
     }
 
-    return Promise.reject(new Error('Not Found'));
+    return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
   };
 }
 
@@ -457,7 +457,7 @@ describe('npm Version Check Action - Helper Functions', () => {
             data: { type: 'file', content: Buffer.from(headActionYml).toString('base64') }
           });
         }
-        return Promise.reject(new Error('Not Found'));
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       const result = await detectNodeRuntimeChange(
@@ -484,7 +484,7 @@ describe('npm Version Check Action - Helper Functions', () => {
             data: { type: 'file', content: Buffer.from(actionYml).toString('base64') }
           });
         }
-        return Promise.reject(new Error('Not Found'));
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       const result = await detectNodeRuntimeChange(
@@ -505,7 +505,7 @@ describe('npm Version Check Action - Helper Functions', () => {
 
       mockOctokit.rest.repos.getContent.mockImplementation(({ path, ref }) => {
         if (path === 'action.yml' && ref === TEST_BASE_SHA) {
-          return Promise.reject(new Error('Not Found'));
+          return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
         }
         if (path === 'action.yml' && ref === TEST_HEAD_SHA) {
           return Promise.resolve({
@@ -517,7 +517,7 @@ describe('npm Version Check Action - Helper Functions', () => {
             }
           });
         }
-        return Promise.reject(new Error('Not Found'));
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       const result = await detectNodeRuntimeChange(
@@ -542,7 +542,7 @@ describe('npm Version Check Action - Helper Functions', () => {
             data: { type: 'file', content: Buffer.from(actionYml).toString('base64') }
           });
         }
-        return Promise.reject(new Error('Not Found'));
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       const result = await detectNodeRuntimeChange(
@@ -573,9 +573,9 @@ describe('npm Version Check Action - Helper Functions', () => {
           });
         }
         if (path === 'action.yml' && ref === TEST_HEAD_SHA) {
-          return Promise.reject(new Error('Not Found'));
+          return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
         }
-        return Promise.reject(new Error('Not Found'));
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       const result = await detectNodeRuntimeChange(
@@ -593,7 +593,7 @@ describe('npm Version Check Action - Helper Functions', () => {
       const { detectNodeRuntimeChange } = indexModule;
 
       mockOctokit.rest.repos.getContent.mockImplementation(() => {
-        return Promise.reject(new Error('Not Found'));
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       const result = await detectNodeRuntimeChange(
@@ -624,7 +624,7 @@ describe('npm Version Check Action - Helper Functions', () => {
             data: { type: 'file', content: Buffer.from(headActionYml).toString('base64') }
           });
         }
-        return Promise.reject(new Error('Not Found'));
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       const result = await detectNodeRuntimeChange(
@@ -657,7 +657,7 @@ describe('npm Version Check Action - Helper Functions', () => {
             data: { type: 'file', content: Buffer.from(headActionYml).toString('base64') }
           });
         }
-        return Promise.reject(new Error('Not Found'));
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       const result = await detectNodeRuntimeChange(
@@ -688,7 +688,7 @@ describe('npm Version Check Action - Helper Functions', () => {
             data: { type: 'file', content: Buffer.from(headActionYml).toString('base64') }
           });
         }
-        return Promise.reject(new Error('Not Found'));
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       const result = await detectNodeRuntimeChange(
@@ -1204,7 +1204,7 @@ describe('hasPackageDependencyChanges', () => {
           data: { type: 'file', content: Buffer.from(JSON.stringify(samePackageJson)).toString('base64') }
         });
       }
-      return Promise.reject(new Error('Not Found'));
+      return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
     });
 
     const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
@@ -1242,7 +1242,7 @@ describe('hasPackageDependencyChanges', () => {
           data: { type: 'file', content: Buffer.from(JSON.stringify(headPackageJson)).toString('base64') }
         });
       }
-      return Promise.reject(new Error('Not Found'));
+      return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
     });
 
     const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
@@ -1498,23 +1498,25 @@ describe('hasPackageDependencyChanges', () => {
     expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false });
   });
 
-  test('should return false when API calls fail with invalid SHA (graceful handling)', async () => {
+  test('should return true when API calls fail (conservative handling)', async () => {
     const { hasPackageDependencyChanges } = indexModule;
 
-    // Simulate an invalid SHA - with API-based approach, this just causes API calls to fail
-    // and getFileAtRef returns null, so no changes are detected
+    // Simulate API failures (rate limit, permissions, etc.)
+    // Non-404 errors should conservatively assume changes exist
     mockGithub.context.eventName = 'pull_request';
     mockGithub.context.sha = TEST_HEAD_SHA;
     mockGithub.context.payload = {
       pull_request: {
-        base: { sha: 'invalid;injection' }
+        base: { sha: TEST_BASE_SHA }
       }
     };
 
-    mockOctokit.rest.repos.getContent.mockRejectedValue(new Error('Not Found'));
+    mockOctokit.rest.repos.getContent.mockRejectedValue(
+      Object.assign(new Error('API rate limit exceeded'), { status: 403 })
+    );
 
     const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
-    expect(result).toEqual({ hasChanges: false, onlyDevDependencies: false });
+    expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false });
   });
 
   test('should sanitize SHA values properly', async () => {
@@ -1527,7 +1529,7 @@ describe('hasPackageDependencyChanges', () => {
           data: { type: 'file', content: Buffer.from(JSON.stringify(mockPackageJson)).toString('base64') }
         });
       }
-      return Promise.reject(new Error('Not Found'));
+      return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
     });
 
     await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
@@ -3447,7 +3449,7 @@ describe('npm Version Check Action - Integration Tests', () => {
             data: { type: 'file', content: Buffer.from('{ "name": "test", "version": "1.0.0" }').toString('base64') }
           });
         }
-        return Promise.reject(new Error('Not Found'));
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
@@ -3477,7 +3479,7 @@ describe('npm Version Check Action - Integration Tests', () => {
             }
           });
         }
-        return Promise.reject(new Error('Not Found'));
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
@@ -3568,7 +3570,7 @@ describe('npm Version Check Action - Integration Tests', () => {
             }
           });
         }
-        return Promise.reject(new Error('Not Found'));
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       await run();
@@ -3604,7 +3606,7 @@ describe('npm Version Check Action - Integration Tests', () => {
             data: { type: 'file', content: Buffer.from('{ "name": "test", "version": "1.0.0" }').toString('base64') }
           });
         }
-        return Promise.reject(new Error('Not Found'));
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       await run();
@@ -3927,7 +3929,7 @@ describe('npm Version Check Action - Integration Tests', () => {
             data: { type: 'file', content: Buffer.from('{ "name": "test", "version": "1.0.0" }').toString('base64') }
           });
         }
-        return Promise.reject(new Error('Not Found'));
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       mockSemver.compare.mockReturnValue(1); // Higher version (but only minor bump)
@@ -3987,7 +3989,7 @@ describe('npm Version Check Action - Integration Tests', () => {
             data: { type: 'file', content: Buffer.from('{ "name": "test", "version": "1.0.0" }').toString('base64') }
           });
         }
-        return Promise.reject(new Error('Not Found'));
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       mockSemver.compare.mockReturnValue(1); // Higher version (major bump)
@@ -4070,7 +4072,7 @@ describe('npm Version Check Action - Integration Tests', () => {
             data: { type: 'file', content: Buffer.from('{ "name": "test", "version": "1.0.0" }').toString('base64') }
           });
         }
-        return Promise.reject(new Error('Not Found'));
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       mockSemver.compare.mockReturnValue(1);
@@ -4122,7 +4124,7 @@ describe('npm Version Check Action - Integration Tests', () => {
             data: { type: 'file', content: Buffer.from('{ "name": "test", "version": "1.0.0" }').toString('base64') }
           });
         }
-        return Promise.reject(new Error('Not Found'));
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       mockSemver.compare.mockReturnValue(1);
@@ -4166,7 +4168,7 @@ describe('npm Version Check Action - Integration Tests', () => {
             data: { type: 'file', content: Buffer.from('{ "name": "test", "version": "1.0.0" }').toString('base64') }
           });
         }
-        return Promise.reject(new Error('Not Found'));
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       mockSemver.compare.mockReturnValue(1);
@@ -4217,7 +4219,7 @@ describe('npm Version Check Action - Integration Tests', () => {
             data: { type: 'file', content: Buffer.from('{ "name": "test", "version": "1.0.0" }').toString('base64') }
           });
         }
-        return Promise.reject(new Error('Not Found'));
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       mockSemver.compare.mockReturnValue(1); // Higher version (but only minor bump)
@@ -4276,7 +4278,7 @@ describe('npm Version Check Action - Integration Tests', () => {
             data: { type: 'file', content: Buffer.from('{ "name": "test", "version": "1.0.0" }').toString('base64') }
           });
         }
-        return Promise.reject(new Error('Not Found'));
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       await run();
@@ -4317,7 +4319,7 @@ describe('npm Version Check Action - Integration Tests', () => {
             data: { type: 'file', content: Buffer.from('{ "name": "test", "version": "1.0.0" }').toString('base64') }
           });
         }
-        return Promise.reject(new Error('Not Found'));
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       await run();
@@ -4392,7 +4394,7 @@ describe('npm Version Check Action - Integration Tests', () => {
             data: { type: 'file', content: Buffer.from('{}').toString('base64') }
           });
         }
-        return Promise.reject(new Error('Not Found'));
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       mockSemver.compare.mockReturnValue(1);
@@ -4431,7 +4433,7 @@ describe('npm Version Check Action - Integration Tests', () => {
             data: { type: 'file', content: Buffer.from('{}').toString('base64') }
           });
         }
-        return Promise.reject(new Error('Not Found'));
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       mockSemver.compare.mockReturnValue(1);
