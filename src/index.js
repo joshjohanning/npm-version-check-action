@@ -172,8 +172,11 @@ export async function getFilesForCommit(sha, octokit, owner, repo) {
 
     return commit.files ? commit.files.map(f => f.filename) : [];
   } catch (error) {
-    logMessage(`⚠️ Could not fetch files for commit ${sha.substring(0, 7)}: ${error.message}`, 'warning');
-    return [];
+    if (error.status === 404) {
+      logMessage(`⚠️ Could not fetch files for commit ${sha.substring(0, 7)}: ${error.message}`, 'warning');
+      return [];
+    }
+    throw error;
   }
 }
 
@@ -247,17 +250,24 @@ export async function applySkipKeywordFilter(prDiffFiles, skipKeyword, token, oc
   // in at least one non-skipped commit.
   const nonSkippedCommits = commits.filter(c => !skippedSHAs.has(c.sha));
 
-  // Fetch files for non-skipped commits with bounded concurrency
+  // Fetch files for non-skipped commits with bounded concurrency.
+  // If any fetch fails (rate limit, permissions), fall back to the full PR diff
+  // to avoid incorrectly filtering out files.
   const BATCH_SIZE = 10;
   const filesFromNonSkippedCommits = new Set();
-  for (let i = 0; i < nonSkippedCommits.length; i += BATCH_SIZE) {
-    const batch = nonSkippedCommits.slice(i, i + BATCH_SIZE);
-    const fileResults = await Promise.all(batch.map(commit => getFilesForCommit(commit.sha, octokit, owner, repo)));
-    for (const files of fileResults) {
-      for (const f of files) {
-        filesFromNonSkippedCommits.add(f);
+  try {
+    for (let i = 0; i < nonSkippedCommits.length; i += BATCH_SIZE) {
+      const batch = nonSkippedCommits.slice(i, i + BATCH_SIZE);
+      const fileResults = await Promise.all(batch.map(commit => getFilesForCommit(commit.sha, octokit, owner, repo)));
+      for (const files of fileResults) {
+        for (const f of files) {
+          filesFromNonSkippedCommits.add(f);
+        }
       }
     }
+  } catch (error) {
+    logMessage(`⚠️ Could not fetch commit files, using full PR diff: ${error.message}`, 'warning');
+    return { files: prDiffFiles, skippedCommits, totalCommits: commits.length };
   }
 
   // Keep only PR diff files that also appear in a non-skipped commit
@@ -915,8 +925,10 @@ export async function detectNodeRuntimeChange(baseRef, headRef, actionYmlPath, o
 
     return result;
   } catch (error) {
-    logMessage(`Warning: Could not check action.yml runtime change: ${error.message}`, 'warning');
-    return result;
+    // Conservative: treat API failures as a potential change to avoid
+    // silently skipping a required major version bump
+    logMessage(`⚠️ Could not check action.yml runtime change: ${error.message}. Assuming change occurred.`, 'warning');
+    return { changed: true, baseVersion: null, headVersion: null };
   }
 }
 

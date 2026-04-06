@@ -3142,10 +3142,10 @@ describe('npm Version Check Action - Integration Tests', () => {
       expect(files).toEqual([]);
     });
 
-    test('should return empty array when API call fails', async () => {
+    test('should return empty array when commit is not found (404)', async () => {
       const { getFilesForCommit } = indexModule;
 
-      mockOctokit.rest.repos.getCommit.mockRejectedValue(new Error('Not found'));
+      mockOctokit.rest.repos.getCommit.mockRejectedValue(Object.assign(new Error('Not found'), { status: 404 }));
 
       const files = await getFilesForCommit(
         'abc1234567890abcdef1234567890abcdef1234',
@@ -3155,6 +3155,18 @@ describe('npm Version Check Action - Integration Tests', () => {
       );
       expect(files).toEqual([]);
       expect(mockCore.warning).toHaveBeenCalledWith('⚠️ Could not fetch files for commit abc1234: Not found');
+    });
+
+    test('should throw on non-404 API errors', async () => {
+      const { getFilesForCommit } = indexModule;
+
+      mockOctokit.rest.repos.getCommit.mockRejectedValue(
+        Object.assign(new Error('API rate limit exceeded'), { status: 403 })
+      );
+
+      await expect(
+        getFilesForCommit('abc1234567890abcdef1234567890abcdef1234', mockOctokit, 'test-owner', 'test-repo')
+      ).rejects.toThrow('API rate limit exceeded');
     });
   });
 
