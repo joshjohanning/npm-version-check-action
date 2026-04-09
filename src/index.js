@@ -198,13 +198,12 @@ export async function getPRDiffFiles(octokit, owner, repo, prNumber) {
  * unnecessary commit API calls when the PR has no relevant changes.
  * @param {string[]} prDiffFiles - Files from the PR diff
  * @param {string} skipKeyword - The keyword to look for in commit messages
- * @param {string} token - GitHub token for API access
  * @param {object} octokit - The authenticated Octokit instance
  * @param {string} owner - Repository owner
  * @param {string} repo - Repository name
  * @returns {Promise<{files: string[], skippedCommits: number, totalCommits: number}>}
  */
-export async function applySkipKeywordFilter(prDiffFiles, skipKeyword, token, octokit, owner, repo) {
+export async function applySkipKeywordFilter(prDiffFiles, skipKeyword, octokit, owner, repo) {
   // Guard against empty keyword — every string includes '', which would skip all commits
   if (!skipKeyword || !skipKeyword.trim()) {
     return { files: prDiffFiles, skippedCommits: 0, totalCommits: 0 };
@@ -1326,7 +1325,6 @@ export async function run() {
         const result = await applySkipKeywordFilter(
           changedFiles,
           skipVersionKeyword,
-          token,
           octokit,
           repoOwner,
           repoName

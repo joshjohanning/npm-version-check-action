@@ -3178,7 +3178,6 @@ describe('npm Version Check Action - Integration Tests', () => {
       const result = await applySkipKeywordFilter(
         prDiffFiles,
         '[skip version]',
-        'test-token',
         mockOctokit,
         'test-owner',
         'test-repo'
@@ -3201,7 +3200,6 @@ describe('npm Version Check Action - Integration Tests', () => {
       const result = await applySkipKeywordFilter(
         prDiffFiles,
         '[skip version]',
-        'test-token',
         mockOctokit,
         'test-owner',
         'test-repo'
@@ -3225,7 +3223,6 @@ describe('npm Version Check Action - Integration Tests', () => {
       const result = await applySkipKeywordFilter(
         prDiffFiles,
         '[skip version]',
-        'test-token',
         mockOctokit,
         'test-owner',
         'test-repo'
@@ -3255,7 +3252,6 @@ describe('npm Version Check Action - Integration Tests', () => {
       const result = await applySkipKeywordFilter(
         prDiffFiles,
         '[skip version]',
-        'test-token',
         mockOctokit,
         'test-owner',
         'test-repo'
@@ -3275,7 +3271,6 @@ describe('npm Version Check Action - Integration Tests', () => {
       const result = await applySkipKeywordFilter(
         prDiffFiles,
         '[skip version]',
-        'test-token',
         mockOctokit,
         'test-owner',
         'test-repo'
@@ -3308,7 +3303,6 @@ describe('npm Version Check Action - Integration Tests', () => {
       const result = await applySkipKeywordFilter(
         prDiffFiles,
         '[skip version]',
-        'test-token',
         mockOctokit,
         'test-owner',
         'test-repo'
@@ -3334,7 +3328,6 @@ describe('npm Version Check Action - Integration Tests', () => {
       const result = await applySkipKeywordFilter(
         prDiffFiles,
         '[skip version]',
-        'test-token',
         mockOctokit,
         'test-owner',
         'test-repo'
@@ -3365,7 +3358,6 @@ describe('npm Version Check Action - Integration Tests', () => {
       const result = await applySkipKeywordFilter(
         prDiffFiles,
         '[skip version]',
-        'test-token',
         mockOctokit,
         'test-owner',
         'test-repo'
