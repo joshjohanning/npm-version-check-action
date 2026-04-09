@@ -130,7 +130,7 @@ export async function getCommitsWithMessages(token) {
   }
 
   try {
-    const apiUrl = core.getInput('github-api-url') || process.env.GITHUB_API_URL || 'https://api.github.com';
+    const apiUrl = process.env.GITHUB_API_URL || 'https://api.github.com';
     const octokit = github.getOctokit(token, { baseUrl: apiUrl });
     // Use pagination to handle PRs with more than 100 commits
     const commits = await octokit.paginate(octokit.rest.pulls.listCommits, {
@@ -1068,7 +1068,7 @@ export async function getLatestVersionTag(tagPrefix, token) {
       throw new Error('GitHub token is required for fetching repository tags. Ensure the token input is configured.');
     }
 
-    const apiUrl = core.getInput('github-api-url') || process.env.GITHUB_API_URL || 'https://api.github.com';
+    const apiUrl = process.env.GITHUB_API_URL || 'https://api.github.com';
     const octokit = github.getOctokit(token, { baseUrl: apiUrl });
     const { owner, repo } = github.context.repo;
 
@@ -1283,7 +1283,7 @@ export async function run() {
     }
 
     // Initialize GitHub API client
-    const apiUrl = core.getInput('github-api-url') || process.env.GITHUB_API_URL || 'https://api.github.com';
+    const apiUrl = process.env.GITHUB_API_URL || 'https://api.github.com';
     const octokit = github.getOctokit(token, { baseUrl: apiUrl });
     const { owner: repoOwner, repo: repoName } = github.context.repo;
 

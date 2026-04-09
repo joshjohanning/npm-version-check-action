@@ -127,18 +127,17 @@ jobs:
 
 ## 📥 Inputs
 
-| Input                                  | Description                                                                                             | Required | Default                 |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------- | -------- | ----------------------- |
-| `package-path`                         | Path to package.json file (relative to repository root)                                                 | No       | `package.json`          |
-| `tag-prefix`                           | Prefix for version tags (e.g., "v" for v1.0.0)                                                          | No       | `v`                     |
-| `skip-files-check`                     | Skip checking if JS/package files changed (always run version check)                                    | No       | `false`                 |
-| `include-dev-dependencies`             | Whether devDependency changes should trigger version bump requirement                                   | No       | `false`                 |
-| `skip-version-keyword`                 | Keyword in commit messages to skip version check for that commit's files. Set to `''` to disable        | No       | `[skip version]`        |
-| `skip-version-consistency-check`       | Skip the check that validates package.json and package-lock.json have matching versions                 | No       | `false`                 |
-| `skip-major-on-actions-runtime-change` | Skip the check that requires a major version bump when `action.yml` changes its Node.js Actions runtime | No       | `false`                 |
-| `skip-sequential-version-check`        | Skip the check that validates version increments are sequential (e.g., 4.0.0 to 4.1.0 not 4.2.0)        | No       | `false`                 |
-| `token`                                | GitHub token for API access (required). Used for fetching PR diff, repository tags, and commit analysis | Yes      | `${{ github.token }}`   |
-| `github-api-url`                       | GitHub API base URL. Override for GHES/GHEC-DR compatibility                                            | No       | `${{ github.api_url }}` |
+| Input                                  | Description                                                                                             | Required | Default               |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------- | -------- | --------------------- |
+| `package-path`                         | Path to package.json file (relative to repository root)                                                 | No       | `package.json`        |
+| `tag-prefix`                           | Prefix for version tags (e.g., "v" for v1.0.0)                                                          | No       | `v`                   |
+| `skip-files-check`                     | Skip checking if JS/package files changed (always run version check)                                    | No       | `false`               |
+| `include-dev-dependencies`             | Whether devDependency changes should trigger version bump requirement                                   | No       | `false`               |
+| `skip-version-keyword`                 | Keyword in commit messages to skip version check for that commit's files. Set to `''` to disable        | No       | `[skip version]`      |
+| `skip-version-consistency-check`       | Skip the check that validates package.json and package-lock.json have matching versions                 | No       | `false`               |
+| `skip-major-on-actions-runtime-change` | Skip the check that requires a major version bump when `action.yml` changes its Node.js Actions runtime | No       | `false`               |
+| `skip-sequential-version-check`        | Skip the check that validates version increments are sequential (e.g., 4.0.0 to 4.1.0 not 4.2.0)        | No       | `false`               |
+| `token`                                | GitHub token for API access (required). Used for fetching PR diff, repository tags, and commit analysis | Yes      | `${{ github.token }}` |
 
 ## 📤 Outputs
 
