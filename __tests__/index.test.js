@@ -4450,7 +4450,7 @@ describe('npm Version Check Action - Integration Tests', () => {
       expect(mockOctokit.paginate).toHaveBeenCalledWith(mockOctokit.rest.repos.listTags, expect.any(Object));
     });
 
-    test('should use standard file diff when all commits contain skip keyword', async () => {
+    test('should use PR file list when all commits contain skip keyword', async () => {
       const { run } = indexModule;
 
       // Mock API responses where all commits have skip keyword
