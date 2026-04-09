@@ -346,7 +346,7 @@ async function getFileAtRef(filePath, ref, octokit, owner, repo) {
       ref
     });
 
-    if (data.type !== 'file' || !data.content) {
+    if (data.type !== 'file' || data.content == null) {
       return null;
     }
 
@@ -1290,10 +1290,10 @@ export async function run() {
       logMessage(`Files changed: ${changedFiles.join(', ')}`);
 
       // Check if the PR diff has any files that would trigger a version check
-      const hasRegularChanges = hasRelevantFileChanges(changedFiles);
+      let hasRegularChanges = hasRelevantFileChanges(changedFiles);
       const packageDepResult = await hasPackageDependencyChanges(changedFiles, octokit, repoOwner, repoName);
-      const hasPackageDepChanges = packageDepResult.hasChanges;
-      const onlyDevDependencies = packageDepResult.onlyDevDependencies;
+      let hasPackageDepChanges = packageDepResult.hasChanges;
+      let onlyDevDependencies = packageDepResult.onlyDevDependencies;
 
       let hasRuntimeChange = false;
       if (!skipMajorOnActionsRuntimeChange) {
@@ -1317,7 +1317,7 @@ export async function run() {
         }
       }
 
-      const wouldTriggerVersionCheck = hasRegularChanges || hasPackageDepChanges || hasRuntimeChange;
+      let wouldTriggerVersionCheck = hasRegularChanges || hasPackageDepChanges || hasRuntimeChange;
 
       // Stage 2: Only do commit analysis if the PR has relevant changes AND
       // skip keyword is set — otherwise there's nothing to skip
@@ -1330,26 +1330,29 @@ export async function run() {
             'notice'
           );
 
-          // Re-evaluate relevance after filtering
-          const filteredHasRegularChanges = hasRelevantFileChanges(changedFiles);
+          // Re-evaluate relevance after filtering and update main flags
+          hasRegularChanges = hasRelevantFileChanges(changedFiles);
           const filteredPackageDepResult = await hasPackageDependencyChanges(
             changedFiles,
             octokit,
             repoOwner,
             repoName
           );
+          hasPackageDepChanges = filteredPackageDepResult.hasChanges;
+          onlyDevDependencies = filteredPackageDepResult.onlyDevDependencies;
 
           // Recompute runtime change — action.yml may have been filtered out
-          let filteredHasRuntimeChange = false;
           if (hasRuntimeChange) {
             const actionYmlStillChanged = changedFiles.some(
               f => f === DEFAULT_ACTION_YML_PATH || f.endsWith(`/${DEFAULT_ACTION_YML_PATH}`)
             );
-            filteredHasRuntimeChange = actionYmlStillChanged;
+            hasRuntimeChange = actionYmlStillChanged;
           }
 
-          if (!filteredHasRegularChanges && !filteredPackageDepResult.hasChanges && !filteredHasRuntimeChange) {
-            if (filteredPackageDepResult.onlyDevDependencies) {
+          wouldTriggerVersionCheck = hasRegularChanges || hasPackageDepChanges || hasRuntimeChange;
+
+          if (!wouldTriggerVersionCheck) {
+            if (onlyDevDependencies) {
               logMessage('⏭️ Only devDependency changes detected, skipping version check', 'notice');
             } else {
               logMessage(
