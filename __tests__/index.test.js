@@ -17,6 +17,7 @@ const mockCore = {
   getBooleanInput: jest.fn(() => false),
   setOutput: jest.fn(),
   setFailed: jest.fn(),
+  setSecret: jest.fn(),
   error: jest.fn(),
   warning: jest.fn(),
   info: jest.fn(),
@@ -2920,9 +2921,8 @@ describe('npm Version Check Action - Integration Tests', () => {
         return versions[a] - versions[b];
       });
 
-      const result = await getLatestVersionTag('v', 'fake-token');
+      const result = await getLatestVersionTag('v', mockOctokit);
       expect(result).toBe('v1.1.0');
-      expect(mockGithub.getOctokit).toHaveBeenCalledWith('fake-token', { baseUrl: 'https://api.github.com' });
       expect(mockOctokit.paginate).toHaveBeenCalledWith(mockOctokit.rest.repos.listTags, {
         owner: 'test-owner',
         repo: 'test-repo',
@@ -2935,7 +2935,7 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockOctokit.paginate.mockResolvedValue([{ name: 'other-tag' }, { name: 'nothing-relevant' }]);
 
-      const result = await getLatestVersionTag('v', 'fake-token');
+      const result = await getLatestVersionTag('v', mockOctokit);
       expect(result).toBeNull();
     });
 
@@ -2944,20 +2944,7 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockOctokit.paginate.mockRejectedValue(new Error('API error'));
 
-      await expect(getLatestVersionTag('v', 'fake-token')).rejects.toThrow(
-        'Failed to fetch repository tags: API error'
-      );
-    });
-
-    test('should throw a clear error when token is empty or undefined', async () => {
-      const { getLatestVersionTag } = indexModule;
-
-      await expect(getLatestVersionTag('v', '')).rejects.toThrow(
-        'Failed to fetch repository tags: GitHub token is required for fetching repository tags'
-      );
-      await expect(getLatestVersionTag('v', undefined)).rejects.toThrow(
-        'Failed to fetch repository tags: GitHub token is required for fetching repository tags'
-      );
+      await expect(getLatestVersionTag('v', mockOctokit)).rejects.toThrow('Failed to fetch repository tags: API error');
     });
   });
 
@@ -3037,7 +3024,7 @@ describe('npm Version Check Action - Integration Tests', () => {
         { sha: 'def4567890abcdef1234567890abcdef123456', commit: { message: 'Fix bug' } }
       ]);
 
-      const commits = await getCommitsWithMessages('test-token');
+      const commits = await getCommitsWithMessages(mockOctokit);
 
       expect(commits).toHaveLength(2);
       // Full message is returned for keyword matching
@@ -3059,7 +3046,7 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockGithub.context.eventName = 'push';
 
-      const commits = await getCommitsWithMessages('test-token');
+      const commits = await getCommitsWithMessages(mockOctokit);
       expect(commits).toEqual([]);
     });
 
@@ -3068,16 +3055,8 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockOctokit.paginate.mockResolvedValue([]);
 
-      const commits = await getCommitsWithMessages('test-token');
+      const commits = await getCommitsWithMessages(mockOctokit);
       expect(commits).toEqual([]);
-    });
-
-    test('should return empty array when no token is provided', async () => {
-      const { getCommitsWithMessages } = indexModule;
-
-      const commits = await getCommitsWithMessages(null);
-      expect(commits).toEqual([]);
-      expect(mockCore.warning).toHaveBeenCalledWith('⚠️ No token provided, cannot fetch PR commits via API');
     });
 
     test('should return empty array when PR number is missing', async () => {
@@ -3085,7 +3064,7 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockGithub.context.payload.pull_request = { base: { sha: TEST_BASE_SHA } }; // No number
 
-      const commits = await getCommitsWithMessages('test-token');
+      const commits = await getCommitsWithMessages(mockOctokit);
       expect(commits).toEqual([]);
       expect(mockCore.warning).toHaveBeenCalledWith('⚠️ Could not determine PR number');
     });
@@ -3095,7 +3074,7 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockOctokit.paginate.mockRejectedValue(new Error('API rate limit exceeded'));
 
-      const commits = await getCommitsWithMessages('test-token');
+      const commits = await getCommitsWithMessages(mockOctokit);
       expect(commits).toEqual([]);
       expect(mockCore.warning).toHaveBeenCalledWith('⚠️ Could not fetch PR commits via API: API rate limit exceeded');
     });

@@ -107,10 +107,10 @@ export function sanitizeSHA(sha, refName) {
 
 /**
  * Get commits in the current PR with their messages
- * @param {string} token - GitHub token for API access
+ * @param {object} octokit - Authenticated Octokit instance
  * @returns {Promise<Array<{sha: string, message: string}>>} Array of commit objects with SHA and message
  */
-export async function getCommitsWithMessages(token) {
+export async function getCommitsWithMessages(octokit) {
   const context = github.context;
 
   if (context.eventName !== 'pull_request') {
@@ -123,15 +123,7 @@ export async function getCommitsWithMessages(token) {
     return [];
   }
 
-  // Use GitHub API to get commits - works with shallow clones
-  if (!token) {
-    logMessage('⚠️ No token provided, cannot fetch PR commits via API', 'warning');
-    return [];
-  }
-
   try {
-    const apiUrl = process.env.GITHUB_API_URL || 'https://api.github.com';
-    const octokit = github.getOctokit(token, { baseUrl: apiUrl });
     // Use pagination to handle PRs with more than 100 commits
     const commits = await octokit.paginate(octokit.rest.pulls.listCommits, {
       owner: context.repo.owner,
@@ -218,7 +210,7 @@ export async function applySkipKeywordFilter(prDiffFiles, skipKeyword, token, oc
     return { files: prDiffFiles, skippedCommits: 0, totalCommits: 0 };
   }
 
-  const commits = await getCommitsWithMessages(token);
+  const commits = await getCommitsWithMessages(octokit);
 
   if (commits.length === 0) {
     return { files: prDiffFiles, skippedCommits: 0, totalCommits: 0 };
@@ -1058,18 +1050,12 @@ export function validatePackageVersionConsistency(packagePath) {
  * This enables `persist-credentials: false` on `actions/checkout` for improved security.
  *
  * @param {string} tagPrefix - The prefix to filter version tags (e.g., 'v' for tags like 'v1.2.3').
- * @param {string} token - GitHub token for API authentication.
+ * @param {object} octokit - Authenticated Octokit instance.
  * @returns {Promise<string|null>} The latest version tag matching the prefix, or null if none found.
  * @throws {Error} If fetching or parsing tags fails.
  */
-export async function getLatestVersionTag(tagPrefix, token) {
+export async function getLatestVersionTag(tagPrefix, octokit) {
   try {
-    if (!token) {
-      throw new Error('GitHub token is required for fetching repository tags. Ensure the token input is configured.');
-    }
-
-    const apiUrl = process.env.GITHUB_API_URL || 'https://api.github.com';
-    const octokit = github.getOctokit(token, { baseUrl: apiUrl });
     const { owner, repo } = github.context.repo;
 
     // Fetch all tags via GitHub API with pagination
@@ -1254,7 +1240,7 @@ export async function run() {
     const skipMajorOnActionsRuntimeChange = core.getInput('skip-major-on-actions-runtime-change') === 'true';
     const skipSequentialVersionCheck = core.getBooleanInput('skip-sequential-version-check');
     const skipVersionKeyword = core.getInput('skip-version-keyword');
-    const token = core.getInput('token') || process.env.GITHUB_TOKEN;
+    const token = (core.getInput('token') || process.env.GITHUB_TOKEN || '').trim();
 
     logMessage(`Package path: ${packagePath}`);
     logMessage(`Tag prefix: ${tagPrefix}`);
@@ -1281,6 +1267,7 @@ export async function run() {
       );
       return;
     }
+    core.setSecret(token);
 
     // Initialize GitHub API client
     const apiUrl = process.env.GITHUB_API_URL || 'https://api.github.com';
@@ -1433,7 +1420,7 @@ export async function run() {
 
     // Get latest tag via GitHub API
     logMessage('🏷️ Fetching repository tags...');
-    const latestTag = await getLatestVersionTag(tagPrefix, token);
+    const latestTag = await getLatestVersionTag(tagPrefix, octokit);
 
     if (!latestTag) {
       logMessage('🎉 No previous version tag found, this appears to be the first release.', 'notice');
