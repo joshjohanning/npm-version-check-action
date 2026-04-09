@@ -1322,13 +1322,7 @@ export async function run() {
       // Stage 2: Only do commit analysis if the PR has relevant changes AND
       // skip keyword is set — otherwise there's nothing to skip
       if (wouldTriggerVersionCheck && skipVersionKeyword) {
-        const result = await applySkipKeywordFilter(
-          changedFiles,
-          skipVersionKeyword,
-          octokit,
-          repoOwner,
-          repoName
-        );
+        const result = await applySkipKeywordFilter(changedFiles, skipVersionKeyword, octokit, repoOwner, repoName);
         changedFiles = result.files;
         if (result.skippedCommits > 0) {
           logMessage(
