@@ -23,8 +23,8 @@ Please refer to the [release page](https://github.com/joshjohanning/npm-version-
 - 🔧 **Configurable devDependencies handling** - Choose whether devDependency changes should trigger version bumps
 - ⏭️ **Per-commit skip support** - Use `[skip version]` in commit messages to exclude specific commits from version checking
 - 📊 **Semantic versioning validation** - Ensures new version is higher than previous release
-- 🏷️ **Git tag comparison** - Compares against the latest git tag
-- 🚀 **Shallow clone compatible** - Uses GitHub API for tag comparison, works with default checkout and `persist-credentials: false`
+- 🏷️ **Git tag comparison** - Compares against the latest version tag via GitHub API
+- 🚀 **No git CLI dependency** - Uses GitHub API exclusively, works with any checkout configuration including `persist-credentials: false`
 - 🎉 **First release support** - Gracefully handles repositories with no previous tags
 - 🚀 **JavaScript action** - Fast execution with Node.js runtime
 - 🔄 **Node.js Actions runtime change detection** - Requires a major version bump when `action.yml` changes its Node.js Actions runtime (e.g., `node20` to `node24`)
@@ -138,7 +138,7 @@ jobs:
 | `skip-version-consistency-check`       | Skip the check that validates package.json and package-lock.json have matching versions                 | No       | `false`               |
 | `skip-major-on-actions-runtime-change` | Skip the check that requires a major version bump when `action.yml` changes its Node.js Actions runtime | No       | `false`               |
 | `skip-sequential-version-check`        | Skip the check that validates version increments are sequential (e.g., 4.0.0 to 4.1.0 not 4.2.0)        | No       | `false`               |
-| `token`                                | GitHub token for API access. Used for fetching repository tags and commit analysis                      | No       | `${{ github.token }}` |
+| `token`                                | GitHub token for API access (required). Used for fetching PR diff, repository tags, and commit analysis | Yes      | `${{ github.token }}` |
 
 ## 📤 Outputs
 
@@ -366,10 +366,6 @@ Ensure your `package.json` has a valid `version` field:
   "version": "1.0.0"
 }
 ```
-
-### "Warning: Could not fetch git tags"
-
-The action automatically fetches git tags to work with shallow clones. If this warning appears, it means there was an issue fetching tags, but the action will continue with limited functionality. This is rare and usually indicates network or permission issues.
 
 ### Node.js Actions Runtime Change Detection
 

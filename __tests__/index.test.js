@@ -17,6 +17,7 @@ const mockCore = {
   getBooleanInput: jest.fn(() => false),
   setOutput: jest.fn(),
   setFailed: jest.fn(),
+  setSecret: jest.fn(),
   error: jest.fn(),
   warning: jest.fn(),
   info: jest.fn(),
@@ -24,20 +25,17 @@ const mockCore = {
   notice: jest.fn()
 };
 
-// Mock @actions/exec
-const mockExec = {
-  exec: jest.fn()
-};
-
 // Mock Octokit methods
 const mockOctokit = {
   rest: {
     pulls: {
-      listCommits: jest.fn()
+      listCommits: jest.fn(),
+      listFiles: jest.fn()
     },
     repos: {
       getCommit: jest.fn(),
-      listTags: jest.fn()
+      listTags: jest.fn(),
+      getContent: jest.fn()
     }
   },
   paginate: jest.fn()
@@ -87,49 +85,51 @@ jest.unstable_mockModule('fs', () => ({
 }));
 
 jest.unstable_mockModule('@actions/core', () => mockCore);
-jest.unstable_mockModule('@actions/exec', () => mockExec);
 jest.unstable_mockModule('@actions/github', () => mockGithub);
 jest.unstable_mockModule('semver', () => ({ default: mockSemver }));
 
 // Dynamic import since we're using ES modules
 const indexModule = await import('../src/index.js');
 
-// Helper function to create a mock implementation that simulates exec.exec behavior
-function createExecMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock) {
-  return async (command, args, options) => {
-    let output = '';
-
-    // Handle getChangedFiles calls
-    if (args.includes('diff') && args.includes('--name-only')) {
-      output = '';
-    }
+// Helper function to create a mock implementation that simulates repos.getContent API behavior
+function createGetContentMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock) {
+  return ({ path, ref }) => {
     // Handle package.json file retrieval
-    else if (args.includes('show') && args.includes(`${TEST_BASE_SHA}:package.json`)) {
-      output = basePackageJson ? JSON.stringify(basePackageJson) : '';
-    } else if (args.includes('show') && args.includes(`${TEST_HEAD_SHA}:package.json`)) {
-      output = headPackageJson ? JSON.stringify(headPackageJson) : '';
+    if (path === 'package.json' && ref === TEST_BASE_SHA) {
+      if (basePackageJson) {
+        return Promise.resolve({
+          data: { type: 'file', content: Buffer.from(JSON.stringify(basePackageJson)).toString('base64') }
+        });
+      }
+      return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
+    }
+    if (path === 'package.json' && ref === TEST_HEAD_SHA) {
+      if (headPackageJson) {
+        return Promise.resolve({
+          data: { type: 'file', content: Buffer.from(JSON.stringify(headPackageJson)).toString('base64') }
+        });
+      }
+      return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
     }
     // Handle package-lock.json file retrieval
-    else if (args.includes('show') && args.includes(`${TEST_BASE_SHA}:package-lock.json`)) {
+    if (path === 'package-lock.json' && ref === TEST_BASE_SHA) {
       if (basePackageLock) {
-        output = JSON.stringify(basePackageLock);
-      } else {
-        throw new Error('File not found');
+        return Promise.resolve({
+          data: { type: 'file', content: Buffer.from(JSON.stringify(basePackageLock)).toString('base64') }
+        });
       }
-    } else if (args.includes('show') && args.includes(`${TEST_HEAD_SHA}:package-lock.json`)) {
+      return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
+    }
+    if (path === 'package-lock.json' && ref === TEST_HEAD_SHA) {
       if (headPackageLock) {
-        output = JSON.stringify(headPackageLock);
-      } else {
-        throw new Error('File not found');
+        return Promise.resolve({
+          data: { type: 'file', content: Buffer.from(JSON.stringify(headPackageLock)).toString('base64') }
+        });
       }
+      return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
     }
 
-    // Simulate the stdout listener behavior from execGit
-    if (options?.listeners?.stdout && output) {
-      options.listeners.stdout(Buffer.from(output));
-    }
-
-    return 0; // Return exit code 0 for success
+    return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
   };
 }
 
@@ -184,93 +184,6 @@ describe('npm Version Check Action - Helper Functions', () => {
       expect(() => sanitizeSHA(undefined, 'testRef')).toThrow('Invalid testRef: must be a non-empty string');
       expect(() => sanitizeSHA('', 'testRef')).toThrow('Invalid testRef: must be a non-empty string');
       expect(() => sanitizeSHA(123, 'testRef')).toThrow('Invalid testRef: must be a non-empty string');
-    });
-  });
-
-  describe('sanitizeFilePath', () => {
-    test('should accept valid file paths', () => {
-      const { sanitizeFilePath } = indexModule;
-
-      expect(() => sanitizeFilePath('package.json', 'testPath')).not.toThrow();
-      expect(() => sanitizeFilePath('package-lock.json', 'testPath')).not.toThrow();
-      expect(() => sanitizeFilePath('src/index.js', 'testPath')).not.toThrow();
-      expect(() => sanitizeFilePath('nested/dir/file.ts', 'testPath')).not.toThrow();
-      expect(sanitizeFilePath('  package.json  ', 'testPath')).toBe('package.json'); // Trims whitespace
-    });
-
-    test('should reject dangerous file paths with shell metacharacters', () => {
-      const { sanitizeFilePath } = indexModule;
-
-      expect(() => sanitizeFilePath('package.json; rm -rf /', 'testPath')).toThrow(
-        'Invalid testPath: contains dangerous characters'
-      );
-      expect(() => sanitizeFilePath('package.json && echo evil', 'testPath')).toThrow(
-        'Invalid testPath: contains dangerous characters'
-      );
-      expect(() => sanitizeFilePath('package.json|cat /etc/passwd', 'testPath')).toThrow(
-        'Invalid testPath: contains dangerous characters'
-      );
-      expect(() => sanitizeFilePath('package.json`whoami`', 'testPath')).toThrow(
-        'Invalid testPath: contains dangerous characters'
-      );
-      expect(() => sanitizeFilePath('package.json$(id)', 'testPath')).toThrow(
-        'Invalid testPath: contains dangerous characters'
-      );
-      expect(() => sanitizeFilePath('package.json"evil"', 'testPath')).toThrow(
-        'Invalid testPath: contains dangerous characters'
-      );
-      expect(() => sanitizeFilePath(`package.json'evil'`, 'testPath')).toThrow(
-        'Invalid testPath: contains dangerous characters'
-      );
-      expect(() => sanitizeFilePath('package.json<evil', 'testPath')).toThrow(
-        'Invalid testPath: contains dangerous characters'
-      );
-      expect(() => sanitizeFilePath('package.json>evil', 'testPath')).toThrow(
-        'Invalid testPath: contains dangerous characters'
-      );
-    });
-
-    test('should reject path traversal attempts', () => {
-      const { sanitizeFilePath } = indexModule;
-
-      expect(() => sanitizeFilePath('../../../etc/passwd', 'testPath')).toThrow(
-        'Invalid testPath: path traversal not allowed'
-      );
-      expect(() => sanitizeFilePath('package.json/../secret', 'testPath')).toThrow(
-        'Invalid testPath: path traversal not allowed'
-      );
-      expect(() => sanitizeFilePath('./../../config', 'testPath')).toThrow(
-        'Invalid testPath: path traversal not allowed'
-      );
-    });
-
-    test('should reject absolute paths', () => {
-      const { sanitizeFilePath } = indexModule;
-
-      expect(() => sanitizeFilePath('/etc/passwd', 'testPath')).toThrow('Invalid testPath: absolute paths not allowed');
-      expect(() => sanitizeFilePath('/var/log/app.log', 'testPath')).toThrow(
-        'Invalid testPath: absolute paths not allowed'
-      );
-    });
-
-    test('should reject paths starting with dash', () => {
-      const { sanitizeFilePath } = indexModule;
-
-      expect(() => sanitizeFilePath('-rf', 'testPath')).toThrow(
-        `Invalid testPath: paths starting with '-' not allowed`
-      );
-      expect(() => sanitizeFilePath('--help', 'testPath')).toThrow(
-        `Invalid testPath: paths starting with '-' not allowed`
-      );
-    });
-
-    test('should reject null, undefined, or non-string values', () => {
-      const { sanitizeFilePath } = indexModule;
-
-      expect(() => sanitizeFilePath(null, 'testPath')).toThrow('Invalid testPath: must be a non-empty string');
-      expect(() => sanitizeFilePath(undefined, 'testPath')).toThrow('Invalid testPath: must be a non-empty string');
-      expect(() => sanitizeFilePath('', 'testPath')).toThrow('Invalid testPath: must be a non-empty string');
-      expect(() => sanitizeFilePath(123, 'testPath')).toThrow('Invalid testPath: must be a non-empty string');
     });
   });
 
@@ -534,16 +447,28 @@ describe('npm Version Check Action - Helper Functions', () => {
       const baseActionYml = `name: 'my-action'\nruns:\n  using: 'node20'\n  main: 'dist/index.js'\n`;
       const headActionYml = `name: 'my-action'\nruns:\n  using: 'node24'\n  main: 'dist/index.js'\n`;
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:action.yml`) {
-          options.listeners.stdout(Buffer.from(baseActionYml));
-        } else if (args.includes('show') && args[1] === `${TEST_HEAD_SHA}:action.yml`) {
-          options.listeners.stdout(Buffer.from(headActionYml));
+      mockOctokit.rest.repos.getContent.mockImplementation(({ path, ref }) => {
+        if (path === 'action.yml' && ref === TEST_BASE_SHA) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from(baseActionYml).toString('base64') }
+          });
         }
-        return 0;
+        if (path === 'action.yml' && ref === TEST_HEAD_SHA) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from(headActionYml).toString('base64') }
+          });
+        }
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
-      const result = await detectNodeRuntimeChange(TEST_BASE_SHA, TEST_HEAD_SHA, 'action.yml');
+      const result = await detectNodeRuntimeChange(
+        TEST_BASE_SHA,
+        TEST_HEAD_SHA,
+        'action.yml',
+        mockOctokit,
+        'test-owner',
+        'test-repo'
+      );
       expect(result.changed).toBe(true);
       expect(result.baseVersion).toBe(20);
       expect(result.headVersion).toBe(24);
@@ -554,17 +479,23 @@ describe('npm Version Check Action - Helper Functions', () => {
 
       const actionYml = `name: 'my-action'\nruns:\n  using: 'node20'\n  main: 'dist/index.js'\n`;
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (
-          args.includes('show') &&
-          (args[1] === `${TEST_BASE_SHA}:action.yml` || args[1] === `${TEST_HEAD_SHA}:action.yml`)
-        ) {
-          options.listeners.stdout(Buffer.from(actionYml));
+      mockOctokit.rest.repos.getContent.mockImplementation(({ path, ref }) => {
+        if (path === 'action.yml' && (ref === TEST_BASE_SHA || ref === TEST_HEAD_SHA)) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from(actionYml).toString('base64') }
+          });
         }
-        return 0;
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
-      const result = await detectNodeRuntimeChange(TEST_BASE_SHA, TEST_HEAD_SHA, 'action.yml');
+      const result = await detectNodeRuntimeChange(
+        TEST_BASE_SHA,
+        TEST_HEAD_SHA,
+        'action.yml',
+        mockOctokit,
+        'test-owner',
+        'test-repo'
+      );
       expect(result.changed).toBe(false);
       expect(result.baseVersion).toBe(20);
       expect(result.headVersion).toBe(20);
@@ -573,18 +504,31 @@ describe('npm Version Check Action - Helper Functions', () => {
     test('should return no change when action.yml does not exist at base ref', async () => {
       const { detectNodeRuntimeChange } = indexModule;
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:action.yml`) {
-          throw new Error('File not found');
-        } else if (args.includes('show') && args[1] === `${TEST_HEAD_SHA}:action.yml`) {
-          options.listeners.stdout(
-            Buffer.from(`name: 'my-action'\nruns:\n  using: 'node20'\n  main: 'dist/index.js'\n`)
-          );
+      mockOctokit.rest.repos.getContent.mockImplementation(({ path, ref }) => {
+        if (path === 'action.yml' && ref === TEST_BASE_SHA) {
+          return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
         }
-        return 0;
+        if (path === 'action.yml' && ref === TEST_HEAD_SHA) {
+          return Promise.resolve({
+            data: {
+              type: 'file',
+              content: Buffer.from(`name: 'my-action'\nruns:\n  using: 'node20'\n  main: 'dist/index.js'\n`).toString(
+                'base64'
+              )
+            }
+          });
+        }
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
-      const result = await detectNodeRuntimeChange(TEST_BASE_SHA, TEST_HEAD_SHA, 'action.yml');
+      const result = await detectNodeRuntimeChange(
+        TEST_BASE_SHA,
+        TEST_HEAD_SHA,
+        'action.yml',
+        mockOctokit,
+        'test-owner',
+        'test-repo'
+      );
       expect(result.changed).toBe(false);
     });
 
@@ -593,17 +537,23 @@ describe('npm Version Check Action - Helper Functions', () => {
 
       const actionYml = `name: 'my-action'\nruns:\n  using: 'composite'\n  steps:\n    - run: echo hello\n`;
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (
-          args.includes('show') &&
-          (args[1] === `${TEST_BASE_SHA}:action.yml` || args[1] === `${TEST_HEAD_SHA}:action.yml`)
-        ) {
-          options.listeners.stdout(Buffer.from(actionYml));
+      mockOctokit.rest.repos.getContent.mockImplementation(({ path, ref }) => {
+        if (path === 'action.yml' && (ref === TEST_BASE_SHA || ref === TEST_HEAD_SHA)) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from(actionYml).toString('base64') }
+          });
         }
-        return 0;
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
-      const result = await detectNodeRuntimeChange(TEST_BASE_SHA, TEST_HEAD_SHA, 'action.yml');
+      const result = await detectNodeRuntimeChange(
+        TEST_BASE_SHA,
+        TEST_HEAD_SHA,
+        'action.yml',
+        mockOctokit,
+        'test-owner',
+        'test-repo'
+      );
       expect(result.changed).toBe(false);
       expect(result.baseVersion).toBeNull();
       expect(result.headVersion).toBeNull();
@@ -612,32 +562,49 @@ describe('npm Version Check Action - Helper Functions', () => {
     test('should return no change when action.yml does not exist at head ref', async () => {
       const { detectNodeRuntimeChange } = indexModule;
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:action.yml`) {
-          options.listeners.stdout(
-            Buffer.from(`name: 'my-action'\nruns:\n  using: 'node20'\n  main: 'dist/index.js'\n`)
-          );
-        } else if (args.includes('show') && args[1] === `${TEST_HEAD_SHA}:action.yml`) {
-          throw new Error('File not found');
+      mockOctokit.rest.repos.getContent.mockImplementation(({ path, ref }) => {
+        if (path === 'action.yml' && ref === TEST_BASE_SHA) {
+          return Promise.resolve({
+            data: {
+              type: 'file',
+              content: Buffer.from(`name: 'my-action'\nruns:\n  using: 'node20'\n  main: 'dist/index.js'\n`).toString(
+                'base64'
+              )
+            }
+          });
         }
-        return 0;
+        if (path === 'action.yml' && ref === TEST_HEAD_SHA) {
+          return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
+        }
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
-      const result = await detectNodeRuntimeChange(TEST_BASE_SHA, TEST_HEAD_SHA, 'action.yml');
+      const result = await detectNodeRuntimeChange(
+        TEST_BASE_SHA,
+        TEST_HEAD_SHA,
+        'action.yml',
+        mockOctokit,
+        'test-owner',
+        'test-repo'
+      );
       expect(result.changed).toBe(false);
     });
 
     test('should return no change when action.yml does not exist at either ref', async () => {
       const { detectNodeRuntimeChange } = indexModule;
 
-      mockExec.exec.mockImplementation(async (command, args) => {
-        if (args.includes('show') && args[1]?.includes('action.yml')) {
-          throw new Error('File not found');
-        }
-        return 0;
+      mockOctokit.rest.repos.getContent.mockImplementation(() => {
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
-      const result = await detectNodeRuntimeChange(TEST_BASE_SHA, TEST_HEAD_SHA, 'action.yml');
+      const result = await detectNodeRuntimeChange(
+        TEST_BASE_SHA,
+        TEST_HEAD_SHA,
+        'action.yml',
+        mockOctokit,
+        'test-owner',
+        'test-repo'
+      );
       expect(result.changed).toBe(false);
     });
 
@@ -647,16 +614,28 @@ describe('npm Version Check Action - Helper Functions', () => {
       const baseActionYml = `name: 'my-action'\nruns:\n  using: 'node24'\n  main: 'dist/index.js'\n`;
       const headActionYml = `name: 'my-action'\nruns:\n  using: 'node20'\n  main: 'dist/index.js'\n`;
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:action.yml`) {
-          options.listeners.stdout(Buffer.from(baseActionYml));
-        } else if (args.includes('show') && args[1] === `${TEST_HEAD_SHA}:action.yml`) {
-          options.listeners.stdout(Buffer.from(headActionYml));
+      mockOctokit.rest.repos.getContent.mockImplementation(({ path, ref }) => {
+        if (path === 'action.yml' && ref === TEST_BASE_SHA) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from(baseActionYml).toString('base64') }
+          });
         }
-        return 0;
+        if (path === 'action.yml' && ref === TEST_HEAD_SHA) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from(headActionYml).toString('base64') }
+          });
+        }
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
-      const result = await detectNodeRuntimeChange(TEST_BASE_SHA, TEST_HEAD_SHA, 'action.yml');
+      const result = await detectNodeRuntimeChange(
+        TEST_BASE_SHA,
+        TEST_HEAD_SHA,
+        'action.yml',
+        mockOctokit,
+        'test-owner',
+        'test-repo'
+      );
       expect(result.changed).toBe(true);
       expect(result.baseVersion).toBe(24);
       expect(result.headVersion).toBe(20);
@@ -668,16 +647,28 @@ describe('npm Version Check Action - Helper Functions', () => {
       const baseActionYml = `name: 'my-action'\nruns:\n  using: 'node20'\n  main: 'dist/index.js'\n`;
       const headActionYml = `name: 'my-action'\nruns:\n  using: 'composite'\n  steps:\n    - run: echo hello\n`;
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:action.yml`) {
-          options.listeners.stdout(Buffer.from(baseActionYml));
-        } else if (args.includes('show') && args[1] === `${TEST_HEAD_SHA}:action.yml`) {
-          options.listeners.stdout(Buffer.from(headActionYml));
+      mockOctokit.rest.repos.getContent.mockImplementation(({ path, ref }) => {
+        if (path === 'action.yml' && ref === TEST_BASE_SHA) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from(baseActionYml).toString('base64') }
+          });
         }
-        return 0;
+        if (path === 'action.yml' && ref === TEST_HEAD_SHA) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from(headActionYml).toString('base64') }
+          });
+        }
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
-      const result = await detectNodeRuntimeChange(TEST_BASE_SHA, TEST_HEAD_SHA, 'action.yml');
+      const result = await detectNodeRuntimeChange(
+        TEST_BASE_SHA,
+        TEST_HEAD_SHA,
+        'action.yml',
+        mockOctokit,
+        'test-owner',
+        'test-repo'
+      );
       expect(result.changed).toBe(false);
     });
 
@@ -687,16 +678,28 @@ describe('npm Version Check Action - Helper Functions', () => {
       const baseActionYml = `name: 'my-action'\nruns:\n  using: 'composite'\n  steps:\n    - run: echo hello\n`;
       const headActionYml = `name: 'my-action'\nruns:\n  using: 'node20'\n  main: 'dist/index.js'\n`;
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:action.yml`) {
-          options.listeners.stdout(Buffer.from(baseActionYml));
-        } else if (args.includes('show') && args[1] === `${TEST_HEAD_SHA}:action.yml`) {
-          options.listeners.stdout(Buffer.from(headActionYml));
+      mockOctokit.rest.repos.getContent.mockImplementation(({ path, ref }) => {
+        if (path === 'action.yml' && ref === TEST_BASE_SHA) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from(baseActionYml).toString('base64') }
+          });
         }
-        return 0;
+        if (path === 'action.yml' && ref === TEST_HEAD_SHA) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from(headActionYml).toString('base64') }
+          });
+        }
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
-      const result = await detectNodeRuntimeChange(TEST_BASE_SHA, TEST_HEAD_SHA, 'action.yml');
+      const result = await detectNodeRuntimeChange(
+        TEST_BASE_SHA,
+        TEST_HEAD_SHA,
+        'action.yml',
+        mockOctokit,
+        'test-owner',
+        'test-repo'
+      );
       expect(result.changed).toBe(false);
     });
   });
@@ -1172,7 +1175,7 @@ describe('hasPackageDependencyChanges', () => {
     const { hasPackageDependencyChanges } = indexModule;
     mockGithub.context.eventName = 'push';
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
     expect(result).toEqual({ hasChanges: false, onlyDevDependencies: false });
   });
 
@@ -1181,7 +1184,7 @@ describe('hasPackageDependencyChanges', () => {
     mockGithub.context.eventName = 'pull_request';
     mockGithub.context.payload = { pull_request: {} }; // No base ref
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
     expect(result).toEqual({ hasChanges: false, onlyDevDependencies: false });
   });
 
@@ -1196,17 +1199,16 @@ describe('hasPackageDependencyChanges', () => {
       }
     };
 
-    mockExec.exec.mockImplementation(async (command, args, _options) => {
-      if (
-        args.includes('show') &&
-        (args.includes(`${TEST_BASE_SHA}:package.json`) || args.includes(`${TEST_HEAD_SHA}:package.json`))
-      ) {
-        return JSON.stringify(samePackageJson);
+    mockOctokit.rest.repos.getContent.mockImplementation(({ path, ref }) => {
+      if (path === 'package.json' && (ref === TEST_BASE_SHA || ref === TEST_HEAD_SHA)) {
+        return Promise.resolve({
+          data: { type: 'file', content: Buffer.from(JSON.stringify(samePackageJson)).toString('base64') }
+        });
       }
-      return '';
+      return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
     });
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
     expect(result).toEqual({ hasChanges: false, onlyDevDependencies: false });
   });
 
@@ -1230,33 +1232,21 @@ describe('hasPackageDependencyChanges', () => {
       }
     };
 
-    mockExec.exec.mockImplementation(async (command, args, options) => {
-      let output = '';
-
-      // Handle getChangedFiles calls
-      if (args.includes('diff') && args.includes('--name-only')) {
-        output = '';
+    mockOctokit.rest.repos.getContent.mockImplementation(({ path, ref }) => {
+      if (path === 'package.json' && ref === TEST_BASE_SHA) {
+        return Promise.resolve({
+          data: { type: 'file', content: Buffer.from(JSON.stringify(basePackageJson)).toString('base64') }
+        });
       }
-      // Handle package.json file retrieval
-      else if (args.includes('show') && args.includes(`${TEST_BASE_SHA}:package.json`)) {
-        output = JSON.stringify(basePackageJson);
-      } else if (args.includes('show') && args.includes(`${TEST_HEAD_SHA}:package.json`)) {
-        output = JSON.stringify(headPackageJson);
+      if (path === 'package.json' && ref === TEST_HEAD_SHA) {
+        return Promise.resolve({
+          data: { type: 'file', content: Buffer.from(JSON.stringify(headPackageJson)).toString('base64') }
+        });
       }
-      // Handle package-lock.json (return error to indicate no file)
-      else if (args.includes('show') && args.includes('package-lock.json')) {
-        throw new Error('File not found');
-      }
-
-      // Simulate the stdout listener behavior from execGit
-      if (options?.listeners?.stdout && output) {
-        options.listeners.stdout(Buffer.from(output));
-      }
-
-      return 0; // Return exit code 0 for success
+      return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
     });
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
     expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false });
   });
 
@@ -1280,9 +1270,9 @@ describe('hasPackageDependencyChanges', () => {
       }
     };
 
-    mockExec.exec.mockImplementation(createExecMock(basePackageJson, headPackageJson));
+    mockOctokit.rest.repos.getContent.mockImplementation(createGetContentMock(basePackageJson, headPackageJson));
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
     expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false });
   });
 
@@ -1306,9 +1296,9 @@ describe('hasPackageDependencyChanges', () => {
       }
     };
 
-    mockExec.exec.mockImplementation(createExecMock(basePackageJson, headPackageJson));
+    mockOctokit.rest.repos.getContent.mockImplementation(createGetContentMock(basePackageJson, headPackageJson));
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
     expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false });
   });
 
@@ -1327,9 +1317,9 @@ describe('hasPackageDependencyChanges', () => {
       bundleDependencies: ['existing-lib', 'my-internal-lib']
     };
 
-    mockExec.exec.mockImplementation(createExecMock(basePackageJson, headPackageJson));
+    mockOctokit.rest.repos.getContent.mockImplementation(createGetContentMock(basePackageJson, headPackageJson));
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
     expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false });
   });
 
@@ -1348,9 +1338,9 @@ describe('hasPackageDependencyChanges', () => {
       bundledDependencies: ['existing-lib', 'my-other-lib']
     };
 
-    mockExec.exec.mockImplementation(createExecMock(basePackageJson, headPackageJson));
+    mockOctokit.rest.repos.getContent.mockImplementation(createGetContentMock(basePackageJson, headPackageJson));
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
     expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false });
   });
 
@@ -1377,9 +1367,9 @@ describe('hasPackageDependencyChanges', () => {
     // Ensure include-dev-dependencies is false (default)
     mockCore.getBooleanInput.mockReturnValue(false);
 
-    mockExec.exec.mockImplementation(createExecMock(basePackageJson, headPackageJson));
+    mockOctokit.rest.repos.getContent.mockImplementation(createGetContentMock(basePackageJson, headPackageJson));
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
     expect(result).toEqual({ hasChanges: false, onlyDevDependencies: false });
   });
 
@@ -1406,9 +1396,9 @@ describe('hasPackageDependencyChanges', () => {
     // Ensure include-dev-dependencies is false (default)
     mockCore.getBooleanInput.mockReturnValue(false);
 
-    mockExec.exec.mockImplementation(createExecMock(basePackageJson, headPackageJson));
+    mockOctokit.rest.repos.getContent.mockImplementation(createGetContentMock(basePackageJson, headPackageJson));
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
     expect(result).toEqual({ hasChanges: false, onlyDevDependencies: true });
   });
 
@@ -1438,9 +1428,9 @@ describe('hasPackageDependencyChanges', () => {
       return false;
     });
 
-    mockExec.exec.mockImplementation(createExecMock(basePackageJson, headPackageJson));
+    mockOctokit.rest.repos.getContent.mockImplementation(createGetContentMock(basePackageJson, headPackageJson));
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
     expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false });
   });
 
@@ -1469,9 +1459,9 @@ describe('hasPackageDependencyChanges', () => {
     // Ensure include-dev-dependencies is false (default)
     mockCore.getBooleanInput.mockReturnValue(false);
 
-    mockExec.exec.mockImplementation(createExecMock(basePackageJson, headPackageJson));
+    mockOctokit.rest.repos.getContent.mockImplementation(createGetContentMock(basePackageJson, headPackageJson));
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
     expect(result).toEqual({ hasChanges: false, onlyDevDependencies: false });
   });
 
@@ -1503,50 +1493,54 @@ describe('hasPackageDependencyChanges', () => {
       }
     };
 
-    mockExec.exec.mockImplementation(createExecMock(basePackageJson, headPackageJson));
+    mockOctokit.rest.repos.getContent.mockImplementation(createGetContentMock(basePackageJson, headPackageJson));
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
     expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false });
   });
 
-  test('should return true when git command fails (err on side of caution)', async () => {
+  test('should return true when API calls fail (conservative handling)', async () => {
     const { hasPackageDependencyChanges } = indexModule;
 
-    // Simulate a critical error that happens before getFileAtRef is called,
-    // such as during SHA sanitization or context setup
+    // Simulate API failures (rate limit, permissions, etc.)
+    // Non-404 errors should conservatively assume changes exist
     mockGithub.context.eventName = 'pull_request';
     mockGithub.context.sha = TEST_HEAD_SHA;
     mockGithub.context.payload = {
       pull_request: {
-        base: { sha: 'invalid;injection' } // This should trigger sanitizeSHA error
+        base: { sha: TEST_BASE_SHA }
       }
     };
 
-    const result = await hasPackageDependencyChanges();
-    expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false });
-    expect(mockCore.warning).toHaveBeenCalledWith(
-      expect.stringContaining('Warning: Could not check package dependency changes')
+    mockOctokit.rest.repos.getContent.mockRejectedValue(
+      Object.assign(new Error('API rate limit exceeded'), { status: 403 })
     );
+
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
+    expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false });
   });
 
-  test('should sanitize SHA values properly', async () => {
+  test('should pass SHA refs to repos.getContent API', async () => {
     const { hasPackageDependencyChanges } = indexModule;
 
-    mockExec.exec.mockImplementation(async (command, args, options) => {
-      // Simulate successful response for package.json to avoid null content
-      if (args.includes('show') && args.includes('package.json')) {
-        const mockPackageJson = { name: 'test', version: '1.0.0' };
-        if (options?.listeners?.stdout) {
-          options.listeners.stdout(Buffer.from(JSON.stringify(mockPackageJson)));
-        }
+    const mockPackageJson = { name: 'test', version: '1.0.0' };
+    mockOctokit.rest.repos.getContent.mockImplementation(({ path, ref }) => {
+      if (path === 'package.json' && (ref === TEST_BASE_SHA || ref === TEST_HEAD_SHA)) {
+        return Promise.resolve({
+          data: { type: 'file', content: Buffer.from(JSON.stringify(mockPackageJson)).toString('base64') }
+        });
       }
-      return 0;
+      return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
     });
 
-    await hasPackageDependencyChanges();
-    // Verify that the git show commands are called with sanitized SHA values
-    expect(mockExec.exec).toHaveBeenCalledWith('git', ['show', `${TEST_BASE_SHA}:package.json`], expect.any(Object));
-    expect(mockExec.exec).toHaveBeenCalledWith('git', ['show', `${TEST_HEAD_SHA}:package.json`], expect.any(Object));
+    await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
+    // Verify that the repos.getContent API is called with the correct refs
+    expect(mockOctokit.rest.repos.getContent).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'package.json', ref: TEST_BASE_SHA })
+    );
+    expect(mockOctokit.rest.repos.getContent).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'package.json', ref: TEST_HEAD_SHA })
+    );
   });
 
   test('should handle complex dependency diffs with multiple sections', async () => {
@@ -1582,9 +1576,9 @@ describe('hasPackageDependencyChanges', () => {
       }
     };
 
-    mockExec.exec.mockImplementation(createExecMock(basePackageJson, headPackageJson));
+    mockOctokit.rest.repos.getContent.mockImplementation(createGetContentMock(basePackageJson, headPackageJson));
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
     expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false });
   });
 
@@ -1633,9 +1627,11 @@ describe('hasPackageDependencyChanges', () => {
       version: '1.0.0'
     };
 
-    mockExec.exec.mockImplementation(createExecMock(packageJson, packageJson, basePackageLock, headPackageLock));
+    mockOctokit.rest.repos.getContent.mockImplementation(
+      createGetContentMock(packageJson, packageJson, basePackageLock, headPackageLock)
+    );
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
     expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false });
   });
 
@@ -1683,11 +1679,11 @@ describe('hasPackageDependencyChanges', () => {
       }
     };
 
-    mockExec.exec.mockImplementation(
-      createExecMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock)
+    mockOctokit.rest.repos.getContent.mockImplementation(
+      createGetContentMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock)
     );
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
     expect(result).toEqual({ hasChanges: false, onlyDevDependencies: false });
   });
 
@@ -1744,11 +1740,11 @@ describe('hasPackageDependencyChanges', () => {
       }
     };
 
-    mockExec.exec.mockImplementation(
-      createExecMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock)
+    mockOctokit.rest.repos.getContent.mockImplementation(
+      createGetContentMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock)
     );
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
     expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false });
   });
 
@@ -1865,11 +1861,11 @@ describe('hasPackageDependencyChanges', () => {
       return false;
     });
 
-    mockExec.exec.mockImplementation(
-      createExecMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock)
+    mockOctokit.rest.repos.getContent.mockImplementation(
+      createGetContentMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock)
     );
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
 
     // This should return onlyDevDependencies: true
     // Even though package-lock.json has significant changes, we're ignoring them
@@ -2022,11 +2018,11 @@ describe('hasPackageDependencyChanges', () => {
       return false;
     });
 
-    mockExec.exec.mockImplementation(
-      createExecMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock)
+    mockOctokit.rest.repos.getContent.mockImplementation(
+      createGetContentMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock)
     );
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
 
     // package.json shows only devDependencies changed, so the lockfile reshuffling
     // of shared packages (without dev: true) should NOT be treated as production changes
@@ -2147,11 +2143,11 @@ describe('hasPackageDependencyChanges', () => {
       return false;
     });
 
-    mockExec.exec.mockImplementation(
-      createExecMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock)
+    mockOctokit.rest.repos.getContent.mockImplementation(
+      createGetContentMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock)
     );
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
 
     // strip-ansi at top level (no dev: true, shared with yargs) changed version but
     // is reachable via jest -> jest-cli -> nested chalk -> strip-ansi (resolving up
@@ -2299,11 +2295,11 @@ describe('hasPackageDependencyChanges', () => {
       return false;
     });
 
-    mockExec.exec.mockImplementation(
-      createExecMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock)
+    mockOctokit.rest.repos.getContent.mockImplementation(
+      createGetContentMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock)
     );
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
 
     // node_modules/cliui/node_modules/ansi-regex changed and has no dev: true,
     // but the package name "ansi-regex" also changed at a confirmed dev path
@@ -2428,11 +2424,11 @@ describe('hasPackageDependencyChanges', () => {
       return false;
     });
 
-    mockExec.exec.mockImplementation(
-      createExecMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock)
+    mockOctokit.rest.repos.getContent.mockImplementation(
+      createGetContentMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock)
     );
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
 
     // undici is NOT a transitive of @octokit/webhooks-types, so it's a genuine
     // production change that should be flagged even though package.json only shows devDep changes
@@ -2526,11 +2522,11 @@ describe('hasPackageDependencyChanges', () => {
       return false;
     });
 
-    mockExec.exec.mockImplementation(
-      createExecMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock)
+    mockOctokit.rest.repos.getContent.mockImplementation(
+      createGetContentMock(basePackageJson, headPackageJson, basePackageLock, headPackageLock)
     );
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
 
     // package.json shows production dependency change, so lockfile changes are real
     expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false });
@@ -2618,9 +2614,11 @@ describe('hasPackageDependencyChanges', () => {
     // Ensure include-dev-dependencies is false (default)
     mockCore.getBooleanInput.mockReturnValue(false);
 
-    mockExec.exec.mockImplementation(createExecMock(packageJson, packageJson, basePackageLock, headPackageLock));
+    mockOctokit.rest.repos.getContent.mockImplementation(
+      createGetContentMock(packageJson, packageJson, basePackageLock, headPackageLock)
+    );
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
     expect(result).toEqual({ hasChanges: false, onlyDevDependencies: true });
   });
 
@@ -2681,9 +2679,11 @@ describe('hasPackageDependencyChanges', () => {
       return false;
     });
 
-    mockExec.exec.mockImplementation(createExecMock(packageJson, packageJson, basePackageLock, headPackageLock));
+    mockOctokit.rest.repos.getContent.mockImplementation(
+      createGetContentMock(packageJson, packageJson, basePackageLock, headPackageLock)
+    );
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
     expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false });
   });
 
@@ -2743,9 +2743,11 @@ describe('hasPackageDependencyChanges', () => {
     // Ensure include-dev-dependencies is false (default)
     mockCore.getBooleanInput.mockReturnValue(false);
 
-    mockExec.exec.mockImplementation(createExecMock(packageJson, packageJson, basePackageLock, headPackageLock));
+    mockOctokit.rest.repos.getContent.mockImplementation(
+      createGetContentMock(packageJson, packageJson, basePackageLock, headPackageLock)
+    );
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
     expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false });
   });
 
@@ -2816,9 +2818,11 @@ describe('hasPackageDependencyChanges', () => {
     // Ensure include-dev-dependencies is false (default)
     mockCore.getBooleanInput.mockReturnValue(false);
 
-    mockExec.exec.mockImplementation(createExecMock(packageJson, packageJson, basePackageLock, headPackageLock));
+    mockOctokit.rest.repos.getContent.mockImplementation(
+      createGetContentMock(packageJson, packageJson, basePackageLock, headPackageLock)
+    );
 
-    const result = await hasPackageDependencyChanges();
+    const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
     // Should return false because only peer metadata changed, no actual dependency changes
     expect(result).toEqual({ hasChanges: false, onlyDevDependencies: false });
   });
@@ -2831,10 +2835,15 @@ describe('hasPackageDependencyChanges', () => {
 
     // Even though there may be actual package.json changes in git,
     // passing a changedFiles array without package files should skip the check
-    const result = await hasPackageDependencyChanges(['src/index.js', 'lib/utils.ts']);
+    const result = await hasPackageDependencyChanges(
+      ['src/index.js', 'lib/utils.ts'],
+      mockOctokit,
+      'test-owner',
+      'test-repo'
+    );
 
-    // Git commands should NOT be called since no package files in the list
-    expect(mockExec.exec).not.toHaveBeenCalled();
+    // API should NOT be called since no package files in the list
+    expect(mockOctokit.rest.repos.getContent).not.toHaveBeenCalled();
     expect(result).toEqual({ hasChanges: false, onlyDevDependencies: false });
   });
 
@@ -2856,15 +2865,24 @@ describe('hasPackageDependencyChanges', () => {
       dependencies: { express: '^4.19.0' }
     };
 
-    mockExec.exec.mockImplementation(createExecMock(basePackageJson, headPackageJson));
+    mockOctokit.rest.repos.getContent.mockImplementation(createGetContentMock(basePackageJson, headPackageJson));
 
-    const result = await hasPackageDependencyChanges(['src/index.js', 'package.json']);
+    const result = await hasPackageDependencyChanges(
+      ['src/index.js', 'package.json'],
+      mockOctokit,
+      'test-owner',
+      'test-repo'
+    );
 
     // Should detect changes since package.json is in the list
     expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false });
-    // Should check package.json
-    expect(mockExec.exec).toHaveBeenCalledWith('git', ['show', `${TEST_BASE_SHA}:package.json`], expect.any(Object));
-    expect(mockExec.exec).toHaveBeenCalledWith('git', ['show', `${TEST_HEAD_SHA}:package.json`], expect.any(Object));
+    // Should check package.json via API
+    expect(mockOctokit.rest.repos.getContent).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'package.json', ref: TEST_BASE_SHA })
+    );
+    expect(mockOctokit.rest.repos.getContent).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'package.json', ref: TEST_HEAD_SHA })
+    );
   });
 });
 
@@ -2880,157 +2898,6 @@ describe('npm Version Check Action - Integration Tests', () => {
     };
   });
 
-  describe('execGit function', () => {
-    test('should execute git commands successfully', async () => {
-      const { execGit } = indexModule;
-      mockExec.exec.mockResolvedValue(0);
-
-      // Mock the stdout listener
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (options.listeners && options.listeners.stdout) {
-          options.listeners.stdout('git output\n');
-        }
-        return 0;
-      });
-
-      const result = await execGit(['diff', '--name-only', TEST_HEAD_SHA, TEST_BASE_SHA]);
-      expect(result).toBe('git output');
-      expect(mockExec.exec).toHaveBeenCalledWith(
-        'git',
-        ['diff', '--name-only', TEST_HEAD_SHA, TEST_BASE_SHA],
-        expect.objectContaining({
-          listeners: expect.any(Object),
-          silent: true
-        })
-      );
-    });
-
-    test('should handle git command failures with stderr', async () => {
-      const { execGit } = indexModule;
-
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (options.listeners && options.listeners.stderr) {
-          options.listeners.stderr('git error message');
-        }
-        throw new Error('Command failed');
-      });
-
-      await expect(execGit(['diff', '--name-only', TEST_HEAD_SHA, TEST_BASE_SHA])).rejects.toThrow(
-        'Git command failed: git error message'
-      );
-    });
-
-    test('should reject dangerous git arguments', async () => {
-      const { execGit } = indexModule;
-
-      await expect(execGit(['diff', '--upload-pack=/bin/sh'])).rejects.toThrow('Dangerous git option detected');
-      await expect(execGit(['diff', '--exec=/bin/sh'])).rejects.toThrow('Dangerous git option detected');
-      await expect(execGit(['diff', 'abc123; rm -rf /'])).rejects.toThrow('Argument contains shell metacharacters');
-    });
-
-    test('should reject unsupported git commands', async () => {
-      const { execGit } = indexModule;
-
-      await expect(execGit(['clone', 'https://example.com/repo.git'])).rejects.toThrow(
-        'Unsupported git command: clone'
-      );
-      await expect(execGit(['push', 'origin', 'main'])).rejects.toThrow('Unsupported git command: push');
-    });
-
-    test('should reject dangerous options', async () => {
-      const { execGit } = indexModule;
-
-      await expect(execGit(['diff', '--dangerous-option'])).rejects.toThrow('Potentially dangerous git option');
-      await expect(execGit(['diff', '--upload-pack'])).rejects.toThrow('Dangerous git option detected');
-      await expect(execGit(['show', '--exec=/bin/sh'])).rejects.toThrow('Dangerous git option detected');
-    });
-
-    test('should allow valid SHA hashes', async () => {
-      const { execGit } = indexModule;
-      mockExec.exec.mockResolvedValue(0);
-
-      // Should not throw for valid SHA patterns
-      await expect(execGit(['diff', '--name-only', 'a1b2c3d', 'f4e5d6c7b8a9'])).resolves.not.toThrow();
-      await expect(execGit(['diff', '--name-only', 'abc123def456', '1234567890abcdef'])).resolves.not.toThrow();
-    });
-
-    test('should reject non-string arguments', async () => {
-      const { execGit } = indexModule;
-
-      await expect(execGit(['diff', null])).rejects.toThrow('All git arguments must be strings');
-      await expect(execGit(['diff', 123])).rejects.toThrow('All git arguments must be strings');
-      await expect(execGit(['diff', {}])).rejects.toThrow('All git arguments must be strings');
-    });
-
-    test('should reject empty arguments array', async () => {
-      const { execGit } = indexModule;
-
-      await expect(execGit([])).rejects.toThrow('Git command arguments cannot be empty');
-      await expect(execGit(null)).rejects.toThrow('Git command arguments cannot be empty');
-      await expect(execGit(undefined)).rejects.toThrow('Git command arguments cannot be empty');
-    });
-
-    test('should allow safe git commands and arguments', async () => {
-      const { execGit } = indexModule;
-      mockExec.exec.mockResolvedValue(0);
-
-      await expect(execGit(['diff', '--name-only', TEST_HEAD_SHA, TEST_BASE_SHA])).resolves.not.toThrow();
-    });
-
-    test('should allow double dash separator for file paths', async () => {
-      const { execGit } = indexModule;
-      mockExec.exec.mockResolvedValue(0);
-
-      // Should not throw for the double dash separator used in hasPackageDependencyChanges
-      await expect(execGit(['diff', TEST_HEAD_SHA, TEST_BASE_SHA, '--', 'package.json'])).resolves.not.toThrow();
-    });
-  });
-  describe('getChangedFiles function', () => {
-    test('should return changed files for pull request', async () => {
-      const { getChangedFiles } = indexModule;
-
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (options.listeners && options.listeners.stdout) {
-          options.listeners.stdout('src/index.js\npackage.json\nREADME.md\n');
-        }
-        return 0;
-      });
-
-      const result = await getChangedFiles();
-      expect(result).toEqual(['src/index.js', 'package.json', 'README.md']);
-    });
-
-    test('should return empty array for non-pull request events', async () => {
-      const { getChangedFiles } = indexModule;
-      mockGithub.context.eventName = 'push';
-
-      const result = await getChangedFiles();
-      expect(result).toEqual([]);
-    });
-
-    test('should throw error when base or head refs are missing', async () => {
-      const { getChangedFiles } = indexModule;
-      mockGithub.context.payload.pull_request.base = null;
-
-      await expect(getChangedFiles()).rejects.toThrow('Could not determine base and head refs for PR');
-    });
-
-    test('should sanitize SHA values and reject malicious input', async () => {
-      const { getChangedFiles } = indexModule;
-
-      // Test with malicious baseRef - will be caught by SHA format validation
-      mockGithub.context.payload.pull_request.base.sha = 'abc123; rm -rf /';
-      await expect(getChangedFiles()).rejects.toThrow('Invalid baseRef format');
-
-      // Test with invalid SHA format
-      mockGithub.context.payload.pull_request.base.sha = 'invalid-sha';
-      await expect(getChangedFiles()).rejects.toThrow('Invalid baseRef format');
-
-      // Reset to valid values
-      mockGithub.context.payload.pull_request.base.sha = TEST_BASE_SHA;
-      mockGithub.context.sha = TEST_HEAD_SHA;
-    });
-  });
   describe('getLatestVersionTag function', () => {
     test('should return latest version tag', async () => {
       const { getLatestVersionTag } = indexModule;
@@ -3054,9 +2921,8 @@ describe('npm Version Check Action - Integration Tests', () => {
         return versions[a] - versions[b];
       });
 
-      const result = await getLatestVersionTag('v', 'fake-token');
+      const result = await getLatestVersionTag('v', mockOctokit);
       expect(result).toBe('v1.1.0');
-      expect(mockGithub.getOctokit).toHaveBeenCalledWith('fake-token');
       expect(mockOctokit.paginate).toHaveBeenCalledWith(mockOctokit.rest.repos.listTags, {
         owner: 'test-owner',
         repo: 'test-repo',
@@ -3069,7 +2935,7 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockOctokit.paginate.mockResolvedValue([{ name: 'other-tag' }, { name: 'nothing-relevant' }]);
 
-      const result = await getLatestVersionTag('v', 'fake-token');
+      const result = await getLatestVersionTag('v', mockOctokit);
       expect(result).toBeNull();
     });
 
@@ -3078,20 +2944,7 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockOctokit.paginate.mockRejectedValue(new Error('API error'));
 
-      await expect(getLatestVersionTag('v', 'fake-token')).rejects.toThrow(
-        'Failed to fetch repository tags: API error'
-      );
-    });
-
-    test('should throw a clear error when token is empty or undefined', async () => {
-      const { getLatestVersionTag } = indexModule;
-
-      await expect(getLatestVersionTag('v', '')).rejects.toThrow(
-        'Failed to fetch repository tags: GitHub token is required for fetching repository tags'
-      );
-      await expect(getLatestVersionTag('v', undefined)).rejects.toThrow(
-        'Failed to fetch repository tags: GitHub token is required for fetching repository tags'
-      );
+      await expect(getLatestVersionTag('v', mockOctokit)).rejects.toThrow('Failed to fetch repository tags: API error');
     });
   });
 
@@ -3171,7 +3024,7 @@ describe('npm Version Check Action - Integration Tests', () => {
         { sha: 'def4567890abcdef1234567890abcdef123456', commit: { message: 'Fix bug' } }
       ]);
 
-      const commits = await getCommitsWithMessages('test-token');
+      const commits = await getCommitsWithMessages(mockOctokit);
 
       expect(commits).toHaveLength(2);
       // Full message is returned for keyword matching
@@ -3193,7 +3046,7 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockGithub.context.eventName = 'push';
 
-      const commits = await getCommitsWithMessages('test-token');
+      const commits = await getCommitsWithMessages(mockOctokit);
       expect(commits).toEqual([]);
     });
 
@@ -3202,16 +3055,8 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockOctokit.paginate.mockResolvedValue([]);
 
-      const commits = await getCommitsWithMessages('test-token');
+      const commits = await getCommitsWithMessages(mockOctokit);
       expect(commits).toEqual([]);
-    });
-
-    test('should return empty array when no token is provided', async () => {
-      const { getCommitsWithMessages } = indexModule;
-
-      const commits = await getCommitsWithMessages(null);
-      expect(commits).toEqual([]);
-      expect(mockCore.warning).toHaveBeenCalledWith('⚠️ No token provided, cannot fetch PR commits via API');
     });
 
     test('should return empty array when PR number is missing', async () => {
@@ -3219,7 +3064,7 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockGithub.context.payload.pull_request = { base: { sha: TEST_BASE_SHA } }; // No number
 
-      const commits = await getCommitsWithMessages('test-token');
+      const commits = await getCommitsWithMessages(mockOctokit);
       expect(commits).toEqual([]);
       expect(mockCore.warning).toHaveBeenCalledWith('⚠️ Could not determine PR number');
     });
@@ -3229,7 +3074,7 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       mockOctokit.paginate.mockRejectedValue(new Error('API rate limit exceeded'));
 
-      const commits = await getCommitsWithMessages('test-token');
+      const commits = await getCommitsWithMessages(mockOctokit);
       expect(commits).toEqual([]);
       expect(mockCore.warning).toHaveBeenCalledWith('⚠️ Could not fetch PR commits via API: API rate limit exceeded');
     });
@@ -3276,10 +3121,10 @@ describe('npm Version Check Action - Integration Tests', () => {
       expect(files).toEqual([]);
     });
 
-    test('should return empty array when API call fails', async () => {
+    test('should return empty array when commit is not found (404)', async () => {
       const { getFilesForCommit } = indexModule;
 
-      mockOctokit.rest.repos.getCommit.mockRejectedValue(new Error('Not found'));
+      mockOctokit.rest.repos.getCommit.mockRejectedValue(Object.assign(new Error('Not found'), { status: 404 }));
 
       const files = await getFilesForCommit(
         'abc1234567890abcdef1234567890abcdef1234',
@@ -3290,9 +3135,21 @@ describe('npm Version Check Action - Integration Tests', () => {
       expect(files).toEqual([]);
       expect(mockCore.warning).toHaveBeenCalledWith('⚠️ Could not fetch files for commit abc1234: Not found');
     });
+
+    test('should throw on non-404 API errors', async () => {
+      const { getFilesForCommit } = indexModule;
+
+      mockOctokit.rest.repos.getCommit.mockRejectedValue(
+        Object.assign(new Error('API rate limit exceeded'), { status: 403 })
+      );
+
+      await expect(
+        getFilesForCommit('abc1234567890abcdef1234567890abcdef1234', mockOctokit, 'test-owner', 'test-repo')
+      ).rejects.toThrow('API rate limit exceeded');
+    });
   });
 
-  describe('getChangedFilesWithSkipSupport function', () => {
+  describe('applySkipKeywordFilter function', () => {
     beforeEach(() => {
       mockGithub.context.eventName = 'pull_request';
       mockGithub.context.sha = TEST_HEAD_SHA;
@@ -3301,7 +3158,8 @@ describe('npm Version Check Action - Integration Tests', () => {
     });
 
     test('should exclude files from commits with skip keyword', async () => {
-      const { getChangedFilesWithSkipSupport } = indexModule;
+      const { applySkipKeywordFilter } = indexModule;
+      const prDiffFiles = ['src/utils.js', 'lib/helper.ts'];
 
       mockOctokit.paginate.mockResolvedValue([
         { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: '[skip version] Fix typo' } },
@@ -3314,83 +3172,70 @@ describe('npm Version Check Action - Integration Tests', () => {
             data: { files: [{ filename: 'src/utils.js' }, { filename: 'lib/helper.ts' }] }
           });
         }
-        // Should not be called for skipped commit
         return Promise.resolve({ data: { files: [] } });
       });
 
-      const result = await getChangedFilesWithSkipSupport('[skip version]', 'test-token');
+      const result = await applySkipKeywordFilter(
+        prDiffFiles,
+        '[skip version]',
+        mockOctokit,
+        'test-owner',
+        'test-repo'
+      );
 
       expect(result.files).toEqual(['src/utils.js', 'lib/helper.ts']);
       expect(result.skippedCommits).toBe(1);
       expect(result.totalCommits).toBe(2);
     });
 
-    test('should include all files when no commits have skip keyword', async () => {
-      const { getChangedFilesWithSkipSupport } = indexModule;
+    test('should return PR diff files when no commits match keyword', async () => {
+      const { applySkipKeywordFilter } = indexModule;
+      const prDiffFiles = ['src/index.js', 'src/utils.js'];
 
       mockOctokit.paginate.mockResolvedValue([
         { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add feature' } },
         { sha: 'def4567890abcdef1234567890abcdef123456', commit: { message: 'Fix bug' } }
       ]);
 
-      mockOctokit.rest.repos.getCommit.mockImplementation(({ ref }) => {
-        if (ref === 'abc1234567890abcdef1234567890abcdef1234') {
-          return Promise.resolve({ data: { files: [{ filename: 'src/index.js' }] } });
-        } else if (ref === 'def4567890abcdef1234567890abcdef123456') {
-          return Promise.resolve({ data: { files: [{ filename: 'src/utils.js' }] } });
-        }
-        return Promise.resolve({ data: { files: [] } });
-      });
-
-      const result = await getChangedFilesWithSkipSupport('[skip version]', 'test-token');
+      const result = await applySkipKeywordFilter(
+        prDiffFiles,
+        '[skip version]',
+        mockOctokit,
+        'test-owner',
+        'test-repo'
+      );
 
       expect(result.files).toContain('src/index.js');
       expect(result.files).toContain('src/utils.js');
       expect(result.skippedCommits).toBe(0);
       expect(result.totalCommits).toBe(2);
+      expect(mockOctokit.rest.repos.getCommit).not.toHaveBeenCalled();
     });
 
     test('should return empty files when all commits are skipped', async () => {
-      const { getChangedFilesWithSkipSupport } = indexModule;
+      const { applySkipKeywordFilter } = indexModule;
+      const prDiffFiles = ['src/index.js'];
 
       mockOctokit.paginate.mockResolvedValue([
         { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: '[skip version] Fix typo' } }
       ]);
 
-      const result = await getChangedFilesWithSkipSupport('[skip version]', 'test-token');
+      const result = await applySkipKeywordFilter(
+        prDiffFiles,
+        '[skip version]',
+        mockOctokit,
+        'test-owner',
+        'test-repo'
+      );
 
       expect(result.files).toEqual([]);
       expect(result.skippedCommits).toBe(1);
       expect(result.totalCommits).toBe(1);
     });
 
-    test('should deduplicate files changed in multiple commits', async () => {
-      const { getChangedFilesWithSkipSupport } = indexModule;
-
-      mockOctokit.paginate.mockResolvedValue([
-        { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add feature' } },
-        { sha: 'def4567890abcdef1234567890abcdef123456', commit: { message: 'Fix bug' } }
-      ]);
-
-      mockOctokit.rest.repos.getCommit.mockImplementation(({ ref }) => {
-        if (ref === 'abc1234567890abcdef1234567890abcdef1234') {
-          return Promise.resolve({ data: { files: [{ filename: 'src/index.js' }, { filename: 'src/utils.js' }] } });
-        } else if (ref === 'def4567890abcdef1234567890abcdef123456') {
-          return Promise.resolve({ data: { files: [{ filename: 'src/index.js' }] } }); // Same file as in first commit
-        }
-        return Promise.resolve({ data: { files: [] } });
-      });
-
-      const result = await getChangedFilesWithSkipSupport('[skip version]', 'test-token');
-
-      // Should contain only unique files
-      expect(result.files).toHaveLength(2);
-      expect(result.files).toContain('src/index.js');
-      expect(result.files).toContain('src/utils.js');
-    });
-
     test('should include file if changed in both skipped and non-skipped commits', async () => {
-      const { getChangedFilesWithSkipSupport } = indexModule;
+      const { applySkipKeywordFilter } = indexModule;
+      const prDiffFiles = ['src/index.js'];
 
       mockOctokit.paginate.mockResolvedValue([
         { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: '[skip version] Fix typo in index' } },
@@ -3398,70 +3243,52 @@ describe('npm Version Check Action - Integration Tests', () => {
       ]);
 
       mockOctokit.rest.repos.getCommit.mockImplementation(({ ref }) => {
-        // Only the non-skipped commit should have files retrieved
         if (ref === 'def4567890abcdef1234567890abcdef123456') {
-          return Promise.resolve({ data: { files: [{ filename: 'src/index.js' }] } }); // Non-skipped commit changes this
+          return Promise.resolve({ data: { files: [{ filename: 'src/index.js' }] } });
         }
         return Promise.resolve({ data: { files: [] } });
       });
 
-      const result = await getChangedFilesWithSkipSupport('[skip version]', 'test-token');
+      const result = await applySkipKeywordFilter(
+        prDiffFiles,
+        '[skip version]',
+        mockOctokit,
+        'test-owner',
+        'test-repo'
+      );
 
-      // File should be included because it was changed in a non-skipped commit
       expect(result.files).toContain('src/index.js');
       expect(result.skippedCommits).toBe(1);
       expect(result.totalCommits).toBe(2);
     });
 
-    test('should return empty when no commits in PR', async () => {
-      const { getChangedFilesWithSkipSupport } = indexModule;
+    test('should return PR diff files when no commits found via API', async () => {
+      const { applySkipKeywordFilter } = indexModule;
+      const prDiffFiles = ['src/index.js'];
 
       mockOctokit.paginate.mockResolvedValue([]);
 
-      const result = await getChangedFilesWithSkipSupport('[skip version]', 'test-token');
+      const result = await applySkipKeywordFilter(
+        prDiffFiles,
+        '[skip version]',
+        mockOctokit,
+        'test-owner',
+        'test-repo'
+      );
 
-      expect(result.files).toEqual([]);
+      expect(result.files).toEqual(['src/index.js']);
       expect(result.skippedCommits).toBe(0);
       expect(result.totalCommits).toBe(0);
     });
 
     test('should detect skip keyword in commit body (multi-line message)', async () => {
-      const { getChangedFilesWithSkipSupport } = indexModule;
-
-      // Simulate a conventional commit with [skip version] in the body/footer
-      mockOctokit.paginate.mockResolvedValue([
-        {
-          sha: 'abc1234567890abcdef1234567890abcdef1234',
-          commit: {
-            message:
-              'refactor: extract functions to improve testability\n\n- Extract helper functions\n- Improve coverage\n\n[skip version]'
-          }
-        },
-        { sha: 'def4567890abcdef1234567890abcdef123456', commit: { message: 'feat: add new feature' } }
-      ]);
-
-      mockOctokit.rest.repos.getCommit.mockImplementation(({ ref }) => {
-        if (ref === 'def4567890abcdef1234567890abcdef123456') {
-          return Promise.resolve({ data: { files: [{ filename: 'src/feature.js' }] } });
-        }
-        // Skipped commit should not have files retrieved
-        return Promise.resolve({ data: { files: [] } });
-      });
-
-      const result = await getChangedFilesWithSkipSupport('[skip version]', 'test-token');
-
-      expect(result.files).toEqual(['src/feature.js']);
-      expect(result.skippedCommits).toBe(1);
-      expect(result.totalCommits).toBe(2);
-    });
-
-    test('should detect skip keyword in single-line commit message (subject)', async () => {
-      const { getChangedFilesWithSkipSupport } = indexModule;
+      const { applySkipKeywordFilter } = indexModule;
+      const prDiffFiles = ['src/feature.js'];
 
       mockOctokit.paginate.mockResolvedValue([
         {
           sha: 'abc1234567890abcdef1234567890abcdef1234',
-          commit: { message: '[skip version] fix: typo in documentation' }
+          commit: { message: 'refactor: extract functions\n\n- Extract helpers\n\n[skip version]' }
         },
         { sha: 'def4567890abcdef1234567890abcdef123456', commit: { message: 'feat: add new feature' } }
       ]);
@@ -3473,28 +3300,38 @@ describe('npm Version Check Action - Integration Tests', () => {
         return Promise.resolve({ data: { files: [] } });
       });
 
-      const result = await getChangedFilesWithSkipSupport('[skip version]', 'test-token');
+      const result = await applySkipKeywordFilter(
+        prDiffFiles,
+        '[skip version]',
+        mockOctokit,
+        'test-owner',
+        'test-repo'
+      );
 
       expect(result.files).toEqual(['src/feature.js']);
       expect(result.skippedCommits).toBe(1);
       expect(result.totalCommits).toBe(2);
     });
 
-    test('should skip all commits when all have skip keyword in body', async () => {
-      const { getChangedFilesWithSkipSupport } = indexModule;
+    test('should skip all commits when all have skip keyword', async () => {
+      const { applySkipKeywordFilter } = indexModule;
+      const prDiffFiles = ['README.md', 'src/lint-fix.js'];
 
       mockOctokit.paginate.mockResolvedValue([
         {
           sha: 'abc1234567890abcdef1234567890abcdef1234',
           commit: { message: 'docs: update README\n\n[skip version]' }
         },
-        {
-          sha: 'def4567890abcdef1234567890abcdef123456',
-          commit: { message: 'chore: fix linting\n\nMinor fixes\n\n[skip version]' }
-        }
+        { sha: 'def4567890abcdef1234567890abcdef123456', commit: { message: 'chore: fix linting\n\n[skip version]' } }
       ]);
 
-      const result = await getChangedFilesWithSkipSupport('[skip version]', 'test-token');
+      const result = await applySkipKeywordFilter(
+        prDiffFiles,
+        '[skip version]',
+        mockOctokit,
+        'test-owner',
+        'test-repo'
+      );
 
       expect(result.files).toEqual([]);
       expect(result.skippedCommits).toBe(2);
@@ -3502,21 +3339,13 @@ describe('npm Version Check Action - Integration Tests', () => {
     });
 
     test('should match skip keyword case-insensitively', async () => {
-      const { getChangedFilesWithSkipSupport } = indexModule;
+      const { applySkipKeywordFilter } = indexModule;
+      const prDiffFiles = ['src/feature.js'];
 
       mockOctokit.paginate.mockResolvedValue([
-        {
-          sha: 'abc1234567890abcdef1234567890abcdef1234',
-          commit: { message: '[SKIP VERSION] uppercase keyword' }
-        },
-        {
-          sha: 'def4567890abcdef1234567890abcdef123456',
-          commit: { message: '[Skip Version] mixed case keyword' }
-        },
-        {
-          sha: 'ccc7890abcdef1234567890abcdef1234567890',
-          commit: { message: 'feat: add feature' }
-        }
+        { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: '[SKIP VERSION] uppercase' } },
+        { sha: 'def4567890abcdef1234567890abcdef123456', commit: { message: '[Skip Version] mixed case' } },
+        { sha: 'ccc7890abcdef1234567890abcdef1234567890', commit: { message: 'feat: add feature' } }
       ]);
 
       mockOctokit.rest.repos.getCommit.mockImplementation(({ ref }) => {
@@ -3526,7 +3355,13 @@ describe('npm Version Check Action - Integration Tests', () => {
         return Promise.resolve({ data: { files: [] } });
       });
 
-      const result = await getChangedFilesWithSkipSupport('[skip version]', 'test-token');
+      const result = await applySkipKeywordFilter(
+        prDiffFiles,
+        '[skip version]',
+        mockOctokit,
+        'test-owner',
+        'test-repo'
+      );
 
       expect(result.files).toEqual(['src/feature.js']);
       expect(result.skippedCommits).toBe(2);
@@ -3534,40 +3369,103 @@ describe('npm Version Check Action - Integration Tests', () => {
     });
   });
 
+  describe('getPRDiffFiles function', () => {
+    beforeEach(() => {
+      mockGithub.context.eventName = 'pull_request';
+      mockGithub.context.sha = TEST_HEAD_SHA;
+      mockGithub.context.payload.pull_request = { base: { sha: TEST_BASE_SHA }, number: 123 };
+      mockGithub.context.repo = { owner: 'test-owner', repo: 'test-repo' };
+    });
+
+    test('should return array of files from PR diff', async () => {
+      const { getPRDiffFiles } = indexModule;
+
+      mockOctokit.paginate.mockResolvedValue([
+        { filename: 'src/index.js' },
+        { filename: 'src/utils.js' },
+        { filename: 'package.json' }
+      ]);
+
+      const result = await getPRDiffFiles(mockOctokit, 'test-owner', 'test-repo', 123);
+
+      expect(result).toEqual(['src/index.js', 'src/utils.js', 'package.json']);
+      expect(mockOctokit.paginate).toHaveBeenCalledWith(mockOctokit.rest.pulls.listFiles, {
+        owner: 'test-owner',
+        repo: 'test-repo',
+        pull_number: 123,
+        per_page: 100
+      });
+    });
+
+    test('should propagate error when API call fails', async () => {
+      const { getPRDiffFiles } = indexModule;
+
+      mockOctokit.paginate.mockRejectedValue(new Error('Not found'));
+
+      await expect(getPRDiffFiles(mockOctokit, 'test-owner', 'test-repo', 123)).rejects.toThrow('Not found');
+    });
+
+    test('should return empty array for PR with no files', async () => {
+      const { getPRDiffFiles } = indexModule;
+
+      mockOctokit.paginate.mockResolvedValue([]);
+
+      const result = await getPRDiffFiles(mockOctokit, 'test-owner', 'test-repo', 123);
+
+      expect(result).toEqual([]);
+    });
+  });
+
   describe('hasPackageDependencyChanges JSON parsing errors', () => {
     test('should handle JSON parsing error in package.json gracefully', async () => {
       const { hasPackageDependencyChanges } = indexModule;
 
-      // Mock execGit to return invalid JSON for package.json
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:package.json`) {
-          options.listeners.stdout('{ invalid json }');
-        } else if (args.includes('show') && args[1] === `${TEST_HEAD_SHA}:package.json`) {
-          options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
+      // Mock getContent to return invalid JSON for base package.json
+      mockOctokit.rest.repos.getContent.mockImplementation(({ path, ref }) => {
+        if (path === 'package.json' && ref === TEST_BASE_SHA) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from('{ invalid json }').toString('base64') }
+          });
         }
-        return 0;
+        if (path === 'package.json' && ref === TEST_HEAD_SHA) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from('{ "name": "test", "version": "1.0.0" }').toString('base64') }
+          });
+        }
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
-      const result = await hasPackageDependencyChanges();
+      const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
       expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false }); // Should conservatively assume change on parse error
     });
 
     test('should handle JSON parsing error in package-lock.json gracefully', async () => {
       const { hasPackageDependencyChanges } = indexModule;
 
-      // Mock execGit to return valid package.json but invalid package-lock.json
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('show') && args[1].includes('package.json')) {
-          options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
-        } else if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:package-lock.json`) {
-          options.listeners.stdout('{ invalid lock json }');
-        } else if (args.includes('show') && args[1] === `${TEST_HEAD_SHA}:package-lock.json`) {
-          options.listeners.stdout('{ "name": "test", "version": "1.0.0", "dependencies": {} }');
+      // Mock getContent to return valid package.json but invalid package-lock.json
+      mockOctokit.rest.repos.getContent.mockImplementation(({ path, ref }) => {
+        if (path === 'package.json' && (ref === TEST_BASE_SHA || ref === TEST_HEAD_SHA)) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from('{ "name": "test", "version": "1.0.0" }').toString('base64') }
+          });
         }
-        return 0;
+        if (path === 'package-lock.json' && ref === TEST_BASE_SHA) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from('{ invalid lock json }').toString('base64') }
+          });
+        }
+        if (path === 'package-lock.json' && ref === TEST_HEAD_SHA) {
+          return Promise.resolve({
+            data: {
+              type: 'file',
+              content: Buffer.from('{ "name": "test", "version": "1.0.0", "dependencies": {} }').toString('base64')
+            }
+          });
+        }
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
-      const result = await hasPackageDependencyChanges();
+      const result = await hasPackageDependencyChanges(null, mockOctokit, 'test-owner', 'test-repo');
       expect(result).toEqual({ hasChanges: true, onlyDevDependencies: false }); // Should conservatively assume change on parse error
     });
   });
@@ -3605,8 +3503,6 @@ describe('npm Version Check Action - Integration Tests', () => {
       mockFs.existsSync.mockReturnValue(true);
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.1.0' }));
 
-      mockExec.exec.mockResolvedValue(0);
-
       // Set up GitHub context for PR
       mockGithub.context.eventName = 'pull_request';
       mockGithub.context.sha = TEST_HEAD_SHA;
@@ -3622,6 +3518,16 @@ describe('npm Version Check Action - Integration Tests', () => {
         if (method === mockOctokit.rest.repos.listTags) {
           return [{ name: 'v1.0.0' }];
         }
+        if (method === mockOctokit.rest.pulls.listFiles) {
+          return [
+            { filename: 'package.json' },
+            { filename: 'src/index.js' },
+            { filename: 'lib/utils.ts' },
+            { filename: 'action.yml' },
+            { filename: 'src/file1.js' },
+            { filename: 'src/file2.ts' }
+          ];
+        }
         return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add new feature' } }];
       });
 
@@ -3629,14 +3535,25 @@ describe('npm Version Check Action - Integration Tests', () => {
         data: { files: [{ filename: 'package.json' }, { filename: 'src/index.js' }] }
       });
 
-      // Mock git commands for package.json diff comparison
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:package.json`) {
-          options.listeners.stdout('{ "name": "test", "dependencies": { "lodash": "^4.0.0" } }');
-        } else if (args.includes('show') && args[1] === `${TEST_HEAD_SHA}:package.json`) {
-          options.listeners.stdout('{ "name": "test", "dependencies": { "lodash": "^4.1.0" } }');
+      // Mock API for package.json diff comparison
+      mockOctokit.rest.repos.getContent.mockImplementation(({ path, ref }) => {
+        if (path === 'package.json' && ref === TEST_BASE_SHA) {
+          return Promise.resolve({
+            data: {
+              type: 'file',
+              content: Buffer.from('{ "name": "test", "dependencies": { "lodash": "^4.0.0" } }').toString('base64')
+            }
+          });
         }
-        return 0;
+        if (path === 'package.json' && ref === TEST_HEAD_SHA) {
+          return Promise.resolve({
+            data: {
+              type: 'file',
+              content: Buffer.from('{ "name": "test", "dependencies": { "lodash": "^4.1.0" } }').toString('base64')
+            }
+          });
+        }
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       await run();
@@ -3655,6 +3572,9 @@ describe('npm Version Check Action - Integration Tests', () => {
         if (method === mockOctokit.rest.repos.listTags) {
           return [{ name: 'v1.0.0' }];
         }
+        if (method === mockOctokit.rest.pulls.listFiles) {
+          return [{ filename: 'src/index.js' }, { filename: 'lib/utils.ts' }];
+        }
         return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add new feature' } }];
       });
 
@@ -3662,12 +3582,14 @@ describe('npm Version Check Action - Integration Tests', () => {
         data: { files: [{ filename: 'src/index.js' }, { filename: 'lib/utils.ts' }] }
       });
 
-      // Mock git commands
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('show') && args[1].includes('package.json')) {
-          options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
+      // Mock API for package.json content
+      mockOctokit.rest.repos.getContent.mockImplementation(({ path, ref }) => {
+        if (path === 'package.json' && (ref === TEST_BASE_SHA || ref === TEST_HEAD_SHA)) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from('{ "name": "test", "version": "1.0.0" }').toString('base64') }
+          });
         }
-        return 0;
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       await run();
@@ -3687,14 +3609,22 @@ describe('npm Version Check Action - Integration Tests', () => {
         if (method === mockOctokit.rest.repos.listTags) {
           return []; // No tags
         }
+        if (method === mockOctokit.rest.pulls.listFiles) {
+          return [
+            { filename: 'package.json' },
+            { filename: 'src/index.js' },
+            { filename: 'lib/utils.ts' },
+            { filename: 'action.yml' },
+            { filename: 'src/file1.js' },
+            { filename: 'src/file2.ts' }
+          ];
+        }
         return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add new feature' } }];
       });
 
       mockOctokit.rest.repos.getCommit.mockResolvedValue({
         data: { files: [{ filename: 'src/index.js' }] }
       });
-
-      mockExec.exec.mockResolvedValue(0);
 
       await run();
 
@@ -3714,14 +3644,22 @@ describe('npm Version Check Action - Integration Tests', () => {
         if (method === mockOctokit.rest.repos.listTags) {
           return [{ name: 'v1.0.0' }];
         }
+        if (method === mockOctokit.rest.pulls.listFiles) {
+          return [
+            { filename: 'package.json' },
+            { filename: 'src/index.js' },
+            { filename: 'lib/utils.ts' },
+            { filename: 'action.yml' },
+            { filename: 'src/file1.js' },
+            { filename: 'src/file2.ts' }
+          ];
+        }
         return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add new feature' } }];
       });
 
       mockOctokit.rest.repos.getCommit.mockResolvedValue({
         data: { files: [{ filename: 'src/index.js' }] }
       });
-
-      mockExec.exec.mockResolvedValue(0);
 
       mockSemver.compare.mockReturnValue(0); // Same version
 
@@ -3745,14 +3683,22 @@ describe('npm Version Check Action - Integration Tests', () => {
         if (method === mockOctokit.rest.repos.listTags) {
           return [{ name: 'v1.0.0' }];
         }
+        if (method === mockOctokit.rest.pulls.listFiles) {
+          return [
+            { filename: 'package.json' },
+            { filename: 'src/index.js' },
+            { filename: 'lib/utils.ts' },
+            { filename: 'action.yml' },
+            { filename: 'src/file1.js' },
+            { filename: 'src/file2.ts' }
+          ];
+        }
         return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add new feature' } }];
       });
 
       mockOctokit.rest.repos.getCommit.mockResolvedValue({
         data: { files: [{ filename: 'src/index.js' }] }
       });
-
-      mockExec.exec.mockResolvedValue(0);
 
       mockSemver.compare.mockReturnValue(-1); // Lower version
 
@@ -3776,14 +3722,22 @@ describe('npm Version Check Action - Integration Tests', () => {
         if (method === mockOctokit.rest.repos.listTags) {
           return [{ name: 'v1.0.0' }];
         }
+        if (method === mockOctokit.rest.pulls.listFiles) {
+          return [
+            { filename: 'package.json' },
+            { filename: 'src/index.js' },
+            { filename: 'lib/utils.ts' },
+            { filename: 'action.yml' },
+            { filename: 'src/file1.js' },
+            { filename: 'src/file2.ts' }
+          ];
+        }
         return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add new feature' } }];
       });
 
       mockOctokit.rest.repos.getCommit.mockResolvedValue({
         data: { files: [{ filename: 'src/index.js' }] }
       });
-
-      mockExec.exec.mockResolvedValue(0);
 
       mockSemver.compare.mockReturnValue(1); // Higher version
 
@@ -3805,14 +3759,22 @@ describe('npm Version Check Action - Integration Tests', () => {
         if (method === mockOctokit.rest.repos.listTags) {
           return [{ name: 'v4.0.0' }];
         }
+        if (method === mockOctokit.rest.pulls.listFiles) {
+          return [
+            { filename: 'package.json' },
+            { filename: 'src/index.js' },
+            { filename: 'lib/utils.ts' },
+            { filename: 'action.yml' },
+            { filename: 'src/file1.js' },
+            { filename: 'src/file2.ts' }
+          ];
+        }
         return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add feature' } }];
       });
 
       mockOctokit.rest.repos.getCommit.mockResolvedValue({
         data: { files: [{ filename: 'src/index.js' }] }
       });
-
-      mockExec.exec.mockResolvedValue(0);
       mockSemver.compare.mockReturnValue(1);
 
       await run();
@@ -3842,14 +3804,22 @@ describe('npm Version Check Action - Integration Tests', () => {
         if (method === mockOctokit.rest.repos.listTags) {
           return [{ name: 'v4.0.0' }];
         }
+        if (method === mockOctokit.rest.pulls.listFiles) {
+          return [
+            { filename: 'package.json' },
+            { filename: 'src/index.js' },
+            { filename: 'lib/utils.ts' },
+            { filename: 'action.yml' },
+            { filename: 'src/file1.js' },
+            { filename: 'src/file2.ts' }
+          ];
+        }
         return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add feature' } }];
       });
 
       mockOctokit.rest.repos.getCommit.mockResolvedValue({
         data: { files: [{ filename: 'src/index.js' }] }
       });
-
-      mockExec.exec.mockResolvedValue(0);
       mockSemver.compare.mockReturnValue(1);
 
       await run();
@@ -3869,14 +3839,22 @@ describe('npm Version Check Action - Integration Tests', () => {
         if (method === mockOctokit.rest.repos.listTags) {
           return [{ name: 'v4.0.0' }];
         }
+        if (method === mockOctokit.rest.pulls.listFiles) {
+          return [
+            { filename: 'package.json' },
+            { filename: 'src/index.js' },
+            { filename: 'lib/utils.ts' },
+            { filename: 'action.yml' },
+            { filename: 'src/file1.js' },
+            { filename: 'src/file2.ts' }
+          ];
+        }
         return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Fix bug' } }];
       });
 
       mockOctokit.rest.repos.getCommit.mockResolvedValue({
         data: { files: [{ filename: 'src/index.js' }] }
       });
-
-      mockExec.exec.mockResolvedValue(0);
       mockSemver.compare.mockReturnValue(1);
 
       await run();
@@ -3898,6 +3876,16 @@ describe('npm Version Check Action - Integration Tests', () => {
         if (method === mockOctokit.rest.repos.listTags) {
           return [{ name: 'v1.0.0' }];
         }
+        if (method === mockOctokit.rest.pulls.listFiles) {
+          return [
+            { filename: 'package.json' },
+            { filename: 'src/index.js' },
+            { filename: 'lib/utils.ts' },
+            { filename: 'action.yml' },
+            { filename: 'src/file1.js' },
+            { filename: 'src/file2.ts' }
+          ];
+        }
         return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Upgrade runtime' } }];
       });
 
@@ -3908,15 +3896,23 @@ describe('npm Version Check Action - Integration Tests', () => {
       const baseActionYml = `name: 'my-action'\nruns:\n  using: 'node20'\n  main: 'dist/index.js'\n`;
       const headActionYml = `name: 'my-action'\nruns:\n  using: 'node24'\n  main: 'dist/index.js'\n`;
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:action.yml`) {
-          options.listeners.stdout(Buffer.from(baseActionYml));
-        } else if (args.includes('show') && args[1] === `${TEST_HEAD_SHA}:action.yml`) {
-          options.listeners.stdout(Buffer.from(headActionYml));
-        } else if (args.includes('show') && args[1]?.includes('package.json')) {
-          options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
+      mockOctokit.rest.repos.getContent.mockImplementation(({ path, ref }) => {
+        if (path === 'action.yml' && ref === TEST_BASE_SHA) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from(baseActionYml).toString('base64') }
+          });
         }
-        return 0;
+        if (path === 'action.yml' && ref === TEST_HEAD_SHA) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from(headActionYml).toString('base64') }
+          });
+        }
+        if (path === 'package.json' && (ref === TEST_BASE_SHA || ref === TEST_HEAD_SHA)) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from('{ "name": "test", "version": "1.0.0" }').toString('base64') }
+          });
+        }
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       mockSemver.compare.mockReturnValue(1); // Higher version (but only minor bump)
@@ -3940,6 +3936,16 @@ describe('npm Version Check Action - Integration Tests', () => {
         if (method === mockOctokit.rest.repos.listTags) {
           return [{ name: 'v1.0.0' }];
         }
+        if (method === mockOctokit.rest.pulls.listFiles) {
+          return [
+            { filename: 'package.json' },
+            { filename: 'src/index.js' },
+            { filename: 'lib/utils.ts' },
+            { filename: 'action.yml' },
+            { filename: 'src/file1.js' },
+            { filename: 'src/file2.ts' }
+          ];
+        }
         return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Upgrade runtime' } }];
       });
 
@@ -3950,15 +3956,23 @@ describe('npm Version Check Action - Integration Tests', () => {
       const baseActionYml = `name: 'my-action'\nruns:\n  using: 'node20'\n  main: 'dist/index.js'\n`;
       const headActionYml = `name: 'my-action'\nruns:\n  using: 'node24'\n  main: 'dist/index.js'\n`;
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:action.yml`) {
-          options.listeners.stdout(Buffer.from(baseActionYml));
-        } else if (args.includes('show') && args[1] === `${TEST_HEAD_SHA}:action.yml`) {
-          options.listeners.stdout(Buffer.from(headActionYml));
-        } else if (args.includes('show') && args[1]?.includes('package.json')) {
-          options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
+      mockOctokit.rest.repos.getContent.mockImplementation(({ path, ref }) => {
+        if (path === 'action.yml' && ref === TEST_BASE_SHA) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from(baseActionYml).toString('base64') }
+          });
         }
-        return 0;
+        if (path === 'action.yml' && ref === TEST_HEAD_SHA) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from(headActionYml).toString('base64') }
+          });
+        }
+        if (path === 'package.json' && (ref === TEST_BASE_SHA || ref === TEST_HEAD_SHA)) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from('{ "name": "test", "version": "1.0.0" }').toString('base64') }
+          });
+        }
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       mockSemver.compare.mockReturnValue(1); // Higher version (major bump)
@@ -3999,8 +4013,6 @@ describe('npm Version Check Action - Integration Tests', () => {
       // Mock API response for tags (skip-files-check: true, so no commit fetching)
       mockOctokit.paginate.mockResolvedValue([{ name: 'v1.0.0' }]);
 
-      mockExec.exec.mockResolvedValue(0);
-
       mockSemver.compare.mockReturnValue(1); // Higher version
 
       await run();
@@ -4020,6 +4032,16 @@ describe('npm Version Check Action - Integration Tests', () => {
         if (method === mockOctokit.rest.repos.listTags) {
           return [{ name: 'v1.0.0' }];
         }
+        if (method === mockOctokit.rest.pulls.listFiles) {
+          return [
+            { filename: 'package.json' },
+            { filename: 'src/index.js' },
+            { filename: 'lib/utils.ts' },
+            { filename: 'action.yml' },
+            { filename: 'src/file1.js' },
+            { filename: 'src/file2.ts' }
+          ];
+        }
         return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add feature' } }];
       });
 
@@ -4027,13 +4049,13 @@ describe('npm Version Check Action - Integration Tests', () => {
         data: { files: [{ filename: 'src/index.js' }] }
       });
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('show') && args[1]?.includes('action.yml')) {
-          throw new Error('File not found');
-        } else if (args.includes('show') && args[1]?.includes('package.json')) {
-          options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
+      mockOctokit.rest.repos.getContent.mockImplementation(({ path, ref }) => {
+        if (path === 'package.json' && (ref === TEST_BASE_SHA || ref === TEST_HEAD_SHA)) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from('{ "name": "test", "version": "1.0.0" }').toString('base64') }
+          });
         }
-        return 0;
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       mockSemver.compare.mockReturnValue(1);
@@ -4055,6 +4077,16 @@ describe('npm Version Check Action - Integration Tests', () => {
         if (method === mockOctokit.rest.repos.listTags) {
           return [{ name: 'v1.0.0' }];
         }
+        if (method === mockOctokit.rest.pulls.listFiles) {
+          return [
+            { filename: 'package.json' },
+            { filename: 'src/index.js' },
+            { filename: 'lib/utils.ts' },
+            { filename: 'action.yml' },
+            { filename: 'src/file1.js' },
+            { filename: 'src/file2.ts' }
+          ];
+        }
         return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add feature' } }];
       });
 
@@ -4064,13 +4096,18 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       const actionYml = `name: 'my-action'\nruns:\n  using: 'node20'\n  main: 'dist/index.js'\n`;
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('show') && args[1]?.includes('action.yml')) {
-          options.listeners.stdout(Buffer.from(actionYml));
-        } else if (args.includes('show') && args[1]?.includes('package.json')) {
-          options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
+      mockOctokit.rest.repos.getContent.mockImplementation(({ path, ref }) => {
+        if (path === 'action.yml' && (ref === TEST_BASE_SHA || ref === TEST_HEAD_SHA)) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from(actionYml).toString('base64') }
+          });
         }
-        return 0;
+        if (path === 'package.json' && (ref === TEST_BASE_SHA || ref === TEST_HEAD_SHA)) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from('{ "name": "test", "version": "1.0.0" }').toString('base64') }
+          });
+        }
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       mockSemver.compare.mockReturnValue(1);
@@ -4090,6 +4127,16 @@ describe('npm Version Check Action - Integration Tests', () => {
         if (method === mockOctokit.rest.repos.listTags) {
           return [{ name: 'v1.0.0' }];
         }
+        if (method === mockOctokit.rest.pulls.listFiles) {
+          return [
+            { filename: 'package.json' },
+            { filename: 'src/index.js' },
+            { filename: 'lib/utils.ts' },
+            { filename: 'action.yml' },
+            { filename: 'src/file1.js' },
+            { filename: 'src/file2.ts' }
+          ];
+        }
         return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Add feature' } }];
       });
 
@@ -4098,13 +4145,13 @@ describe('npm Version Check Action - Integration Tests', () => {
       });
 
       // Make action.yml retrieval fail with an unexpected error on both refs
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('show') && args[1]?.includes('action.yml')) {
-          throw new Error('Unexpected git error');
-        } else if (args.includes('show') && args[1]?.includes('package.json')) {
-          options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
+      mockOctokit.rest.repos.getContent.mockImplementation(({ path, ref }) => {
+        if (path === 'package.json' && (ref === TEST_BASE_SHA || ref === TEST_HEAD_SHA)) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from('{ "name": "test", "version": "1.0.0" }').toString('base64') }
+          });
         }
-        return 0;
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       mockSemver.compare.mockReturnValue(1);
@@ -4126,6 +4173,9 @@ describe('npm Version Check Action - Integration Tests', () => {
         if (method === mockOctokit.rest.repos.listTags) {
           return [{ name: 'v1.0.0' }];
         }
+        if (method === mockOctokit.rest.pulls.listFiles) {
+          return [{ filename: 'action.yml' }];
+        }
         return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Upgrade runtime' } }];
       });
 
@@ -4136,15 +4186,23 @@ describe('npm Version Check Action - Integration Tests', () => {
       const baseActionYml = `name: 'my-action'\nruns:\n  using: 'node20'\n  main: 'dist/index.js'\n`;
       const headActionYml = `name: 'my-action'\nruns:\n  using: 'node24'\n  main: 'dist/index.js'\n`;
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('show') && args[1] === `${TEST_BASE_SHA}:action.yml`) {
-          options.listeners.stdout(Buffer.from(baseActionYml));
-        } else if (args.includes('show') && args[1] === `${TEST_HEAD_SHA}:action.yml`) {
-          options.listeners.stdout(Buffer.from(headActionYml));
-        } else if (args.includes('show') && args[1]?.includes('package.json')) {
-          options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
+      mockOctokit.rest.repos.getContent.mockImplementation(({ path, ref }) => {
+        if (path === 'action.yml' && ref === TEST_BASE_SHA) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from(baseActionYml).toString('base64') }
+          });
         }
-        return 0;
+        if (path === 'action.yml' && ref === TEST_HEAD_SHA) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from(headActionYml).toString('base64') }
+          });
+        }
+        if (path === 'package.json' && (ref === TEST_BASE_SHA || ref === TEST_HEAD_SHA)) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from('{ "name": "test", "version": "1.0.0" }').toString('base64') }
+          });
+        }
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       mockSemver.compare.mockReturnValue(1); // Higher version (but only minor bump)
@@ -4186,19 +4244,24 @@ describe('npm Version Check Action - Integration Tests', () => {
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.1.0' }));
 
       // Only action.yml changed
-      mockOctokit.paginate.mockResolvedValue([
-        { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Upgrade runtime' } }
-      ]);
+      mockOctokit.paginate.mockImplementation(async method => {
+        if (method === mockOctokit.rest.pulls.listFiles) {
+          return [{ filename: 'action.yml' }];
+        }
+        return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Upgrade runtime' } }];
+      });
 
       mockOctokit.rest.repos.getCommit.mockResolvedValue({
         data: { files: [{ filename: 'action.yml' }] }
       });
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('show') && args[1]?.includes('package.json')) {
-          options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
+      mockOctokit.rest.repos.getContent.mockImplementation(({ path, ref }) => {
+        if (path === 'package.json' && (ref === TEST_BASE_SHA || ref === TEST_HEAD_SHA)) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from('{ "name": "test", "version": "1.0.0" }').toString('base64') }
+          });
         }
-        return 0;
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       await run();
@@ -4215,9 +4278,12 @@ describe('npm Version Check Action - Integration Tests', () => {
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ name: 'test', version: '1.1.0' }));
 
       // Only action.yml changed but runtime is the same
-      mockOctokit.paginate.mockResolvedValue([
-        { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Update description' } }
-      ]);
+      mockOctokit.paginate.mockImplementation(async method => {
+        if (method === mockOctokit.rest.pulls.listFiles) {
+          return [{ filename: 'action.yml' }];
+        }
+        return [{ sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Update description' } }];
+      });
 
       mockOctokit.rest.repos.getCommit.mockResolvedValue({
         data: { files: [{ filename: 'action.yml' }] }
@@ -4225,13 +4291,18 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       const actionYml = `name: 'my-action'\nruns:\n  using: 'node20'\n  main: 'dist/index.js'\n`;
 
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('show') && args[1]?.includes('action.yml')) {
-          options.listeners.stdout(Buffer.from(actionYml));
-        } else if (args.includes('show') && args[1]?.includes('package.json')) {
-          options.listeners.stdout('{ "name": "test", "version": "1.0.0" }');
+      mockOctokit.rest.repos.getContent.mockImplementation(({ path, ref }) => {
+        if (path === 'action.yml' && (ref === TEST_BASE_SHA || ref === TEST_HEAD_SHA)) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from(actionYml).toString('base64') }
+          });
         }
-        return 0;
+        if (path === 'package.json' && (ref === TEST_BASE_SHA || ref === TEST_HEAD_SHA)) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from('{ "name": "test", "version": "1.0.0" }').toString('base64') }
+          });
+        }
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       await run();
@@ -4268,6 +4339,36 @@ describe('npm Version Check Action - Integration Tests', () => {
       );
     });
 
+    test('should fail early when no token is provided', async () => {
+      const { run } = indexModule;
+
+      mockCore.getInput.mockImplementation(input => {
+        switch (input) {
+          case 'package-path':
+            return 'package.json';
+          case 'token':
+            return '';
+          default:
+            return '';
+        }
+      });
+
+      // Clear GITHUB_TOKEN env var
+      const originalToken = process.env.GITHUB_TOKEN;
+      delete process.env.GITHUB_TOKEN;
+
+      await run();
+
+      expect(mockCore.setFailed).toHaveBeenCalledWith(
+        '❌ ERROR: GitHub token is required. Ensure the token input is configured or GITHUB_TOKEN is available.'
+      );
+
+      // Restore env
+      if (originalToken) {
+        process.env.GITHUB_TOKEN = originalToken;
+      }
+    });
+
     test('should skip commit analysis when skip-version-keyword is empty string', async () => {
       const { run } = indexModule;
 
@@ -4289,18 +4390,25 @@ describe('npm Version Check Action - Integration Tests', () => {
         }
       });
 
-      // Mock git commands for standard file diff (not commit analysis)
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('diff') && args.includes('--name-only')) {
-          options.listeners.stdout('src/index.js\n');
-        } else if (args.includes('show')) {
-          options.listeners.stdout('{}');
+      // Mock paginate for listFiles (PR diff) and listTags
+      mockOctokit.paginate.mockImplementation(async method => {
+        if (method === mockOctokit.rest.pulls.listFiles) {
+          return [{ filename: 'src/index.js' }];
         }
-        return 0;
+        if (method === mockOctokit.rest.repos.listTags) {
+          return [{ name: 'v1.0.0' }];
+        }
+        return [];
       });
 
-      // Mock API response for tags (getLatestVersionTag still uses paginate)
-      mockOctokit.paginate.mockResolvedValue([{ name: 'v1.0.0' }]);
+      mockOctokit.rest.repos.getContent.mockImplementation(({ path: _path, ref }) => {
+        if (ref === TEST_BASE_SHA || ref === TEST_HEAD_SHA) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from('{}').toString('base64') }
+          });
+        }
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
+      });
 
       mockSemver.compare.mockReturnValue(1);
 
@@ -4308,35 +4416,37 @@ describe('npm Version Check Action - Integration Tests', () => {
 
       // Should NOT call paginate with listCommits when skip-version-keyword is empty
       expect(mockOctokit.paginate).not.toHaveBeenCalledWith(mockOctokit.rest.pulls.listCommits, expect.any(Object));
-      // Should still call paginate for tags
+      // Should still call paginate for listFiles and tags
+      expect(mockOctokit.paginate).toHaveBeenCalledWith(mockOctokit.rest.pulls.listFiles, expect.any(Object));
       expect(mockOctokit.paginate).toHaveBeenCalledWith(mockOctokit.rest.repos.listTags, expect.any(Object));
-      // Should use standard file diff instead
-      expect(mockCore.info).toHaveBeenCalledWith('📁 Checking files changed in PR...');
     });
 
-    test('should use standard file diff when all commits contain skip keyword', async () => {
+    test('should use PR file list when all commits contain skip keyword', async () => {
       const { run } = indexModule;
 
       // Mock API responses where all commits have skip keyword
-      mockOctokit.paginate.mockResolvedValue([
-        { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Fix [skip version]' } },
-        { sha: 'def5678901234567890abcdef1234567890abcd', commit: { message: 'Update [skip version]' } }
-      ]);
-
-      mockOctokit.rest.repos.getCommit
-        .mockResolvedValueOnce({
-          data: { files: [{ filename: 'src/file1.js' }] }
-        })
-        .mockResolvedValueOnce({
-          data: { files: [{ filename: 'src/file2.ts' }] }
-        });
-
-      // Mock git commands for show (version check not reached in this flow)
-      mockExec.exec.mockImplementation(async (command, args, options) => {
-        if (args.includes('show')) {
-          options.listeners.stdout('{}');
+      mockOctokit.paginate.mockImplementation(async method => {
+        if (method === mockOctokit.rest.pulls.listFiles) {
+          return [{ filename: 'src/file1.js' }, { filename: 'src/file2.ts' }];
         }
-        return 0;
+        if (method === mockOctokit.rest.repos.listTags) {
+          return [{ name: 'v1.0.0' }];
+        }
+        // listCommits
+        return [
+          { sha: 'abc1234567890abcdef1234567890abcdef1234', commit: { message: 'Fix [skip version]' } },
+          { sha: 'def5678901234567890abcdef1234567890abcd', commit: { message: 'Update [skip version]' } }
+        ];
+      });
+
+      // Mock API for file content (version check not reached in this flow)
+      mockOctokit.rest.repos.getContent.mockImplementation(({ path: _path, ref }) => {
+        if (ref === TEST_BASE_SHA || ref === TEST_HEAD_SHA) {
+          return Promise.resolve({
+            data: { type: 'file', content: Buffer.from('{}').toString('base64') }
+          });
+        }
+        return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
       });
 
       mockSemver.compare.mockReturnValue(1);
@@ -4386,8 +4496,6 @@ describe('npm Version Check Action - Integration Tests', () => {
         }
         return '{}';
       });
-
-      mockExec.exec.mockResolvedValue(0);
 
       // Mock API response for tags (skip-files-check: true, so no commit fetching)
       mockOctokit.paginate.mockResolvedValue([{ name: 'v1.0.0' }]);
@@ -4440,8 +4548,6 @@ describe('npm Version Check Action - Integration Tests', () => {
         }
         return '{}';
       });
-
-      mockExec.exec.mockResolvedValue(0);
 
       await run();
 
