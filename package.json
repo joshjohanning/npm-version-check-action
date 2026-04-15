@@ -1,7 +1,7 @@
 {
   "name": "npm-version-check-action",
   "description": "GitHub Action that validates npm package version increments in pull requests to ensure proper semantic versioning",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "type": "module",
   "author": {
     "name": "Josh Johanning",
@@ -47,7 +47,7 @@
   "license": "MIT",
   "dependencies": {
     "@actions/core": "^3.0.0",
-    "@actions/github": "^9.0.0",
+    "@actions/github": "^9.1.0",
     "semver": "^7.7.4"
   },
   "devDependencies": {
